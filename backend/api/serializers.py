@@ -105,7 +105,12 @@ class EntrySerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         request = self.context.get('request')
-        user = request.user
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            user = User.objects.filter(is_superuser=True).first() or User.objects.first()
+
+        if not user:
+            raise serializers.ValidationError("No user available. Create at least one user before adding entries.")
 
         parties_data = validated_data.pop('parties')
         witnesses_data = validated_data.pop('witnesses')

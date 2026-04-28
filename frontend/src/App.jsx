@@ -4,14 +4,13 @@ import Dashboard from './components/Dashboard';
 import NotarialRegisterBooks from './components/NotarialRegisterBooks';
 import NotarialEntries from './components/NotarialEntries';
 import ManageUser from './components/ManageUser';
-import './App.css';
 
 function App() {
   return (
     <BrowserRouter>
-      <div className="app-container">
+      <div className="flex min-h-screen w-full flex-col md:flex-row">
         <Navbar />
-        <main className="main-content">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8">
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/notarial-register-book" element={<NotarialRegisterBooks />} />
