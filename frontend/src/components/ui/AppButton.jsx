@@ -1,9 +1,13 @@
 import React from 'react';
 
+import { BRAND } from '../../lib/brandClasses';
+
 const variants = {
-  primary: 'bg-blue-600 text-white hover:bg-blue-700',
-  secondary: 'bg-slate-200 text-slate-800 hover:bg-slate-300',
-  outline: 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50',
+  primary: `${BRAND.buttonPrimary} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-red-600`,
+  secondary:
+    'bg-slate-200 text-slate-800 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600',
+  outline:
+    'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900',
   danger: 'bg-red-600 text-white hover:bg-red-700',
 };
 

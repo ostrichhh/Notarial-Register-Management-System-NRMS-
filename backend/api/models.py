@@ -11,14 +11,20 @@ class User(AbstractUser):
         ('SECRETARY', 'Secretary')
     )
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    requires_password_change = models.BooleanField(
+        default=False,
+        help_text='When True, client must redirect to mandatory password reset after login.',
+    )
 
 
 
 # BOOK
 
 class Book(models.Model):
-    book_number = models.CharField(max_length=50, unique=True)
+    book_number = models.CharField(max_length=50)
     total_pages = models.IntegerField(default=105)
+    appointment_date = models.DateField(null=True, blank=True)
+    expiration_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     # ARCHIVE
@@ -32,6 +38,15 @@ class Book(models.Model):
 
     def __str__(self):
         return f"Book {self.book_number}"
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['book_number'],
+                condition=models.Q(is_archived=False),
+                name='uniq_active_book_number',
+            )
+        ]
 
 
 
@@ -100,7 +115,13 @@ class Entry(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ('book', 'entry_number')
+        constraints = [
+            models.UniqueConstraint(
+                fields=['book', 'entry_number'],
+                condition=models.Q(is_archived=False),
+                name='uniq_active_entry_number_per_book',
+            )
+        ]
 
     def __str__(self):
         return f"Entry {self.entry_number} - Book {self.book.book_number}"
@@ -149,13 +170,17 @@ class AuditLog(models.Model):
         ('CREATE', 'Create'),
         ('UPDATE', 'Update'),
         ('DELETE', 'Delete'),
+        ('LOGIN', 'Login'),
+        ('LOGOUT', 'Logout'),
+        ('PASSWORD_CHANGE', 'Password change'),
+        ('REPORT', 'Report generated'),
     )
 
     user = models.ForeignKey(User, null=True, on_delete=models.SET_NULL)
 
-    action = models.CharField(max_length=10, choices=ACTIONS)
+    action = models.CharField(max_length=20, choices=ACTIONS)
     model_name = models.CharField(max_length=100)
-    object_id = models.IntegerField()
+    object_id = models.IntegerField(null=True, blank=True)
 
     timestamp = models.DateTimeField(auto_now_add=True)
     description = models.TextField(blank=True)
