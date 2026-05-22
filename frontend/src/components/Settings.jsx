@@ -15,10 +15,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/shadcn/Dialog';
-import { Input } from './ui/shadcn/Input';
 import { Label } from './ui/shadcn/Label';
 import { Separator } from './ui/shadcn/Separator';
+import PasswordInput from './ui/PasswordInput';
 import { useAuth } from '../context/AuthContext';
+import { summarizeApiError } from '../lib/friendlyErrors';
+import { setFlashMessage } from '../lib/flashMessages';
 import VisualPreferencesCard from './settings/VisualPreferencesCard';
 
 export default function Settings() {
@@ -56,20 +58,18 @@ export default function Settings() {
       setConfirmPassword('');
       setPasswordModalOpen(false);
       await logout();
+      setFlashMessage('login', {
+        variant: 'success',
+        title: 'Password updated',
+        msg: 'Password changed. Please log in with your new password.',
+      });
       navigate('/login', {
         replace: true,
-        state: { postLogoutMessage: 'Password updated. Please sign in again with your new password.' },
+        state: { passwordChangedMessage: 'Password changed. Please log in with your new password.' },
       });
     } catch (err) {
       const body = err.response?.data;
-      const flat =
-        body &&
-        typeof body === 'object' &&
-        Object.entries(body)
-          .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(' ') : v}`)
-          .join(' ');
-      const detail = flat || body?.detail || err.message || 'Could not update password.';
-      setPwdErr(typeof detail === 'string' ? detail : JSON.stringify(detail));
+      setPwdErr(summarizeApiError(body, err.message || 'Could not update password.'));
     } finally {
       setPwdBusy(false);
     }
@@ -130,9 +130,8 @@ export default function Settings() {
           <form className="space-y-4" onSubmit={submitPasswordChange}>
             <div className="space-y-2">
               <Label htmlFor="current-password">Current password</Label>
-              <Input
+              <PasswordInput
                 id="current-password"
-                type="password"
                 autoComplete="current-password"
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
@@ -144,9 +143,8 @@ export default function Settings() {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="new-password">New password</Label>
-                <Input
+                <PasswordInput
                   id="new-password"
-                  type="password"
                   autoComplete="new-password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
@@ -157,9 +155,8 @@ export default function Settings() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirm-password">Confirm password</Label>
-                <Input
+                <PasswordInput
                   id="confirm-password"
-                  type="password"
                   autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router';
-import { Archive, Download, Edit } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router';
+import { Archive, Download, Edit, Plus } from 'lucide-react';
 import AxiosInstance from './Axios';
 import Alert from './ui/Alert';
 import AlertDialog from './ui/AlertDialog';
@@ -124,14 +124,20 @@ const buildReportRow = (entry, fallbackEntryNumber) => {
 };
 
 const resolveReportYear = (book, entries = []) => {
+  const years = [...new Set(
+    entries
+      .map((entry) => {
+        const date = new Date(entry.date_time);
+        return Number.isNaN(date.getTime()) ? null : date.getFullYear();
+      })
+      .filter(Boolean)
+  )].sort((a, b) => a - b);
+
+  if (years.length === 1) return years[0];
+  if (years.length > 1) return `${years[0]}-${years[years.length - 1]}`;
+
   if (book?.appointment_date) {
     const date = new Date(`${book.appointment_date}T00:00:00`);
-    if (!Number.isNaN(date.getTime())) return date.getFullYear();
-  }
-
-  const entryWithDate = entries.find((entry) => entry.date_time);
-  if (entryWithDate) {
-    const date = new Date(entryWithDate.date_time);
     if (!Number.isNaN(date.getTime())) return date.getFullYear();
   }
 
@@ -139,12 +145,14 @@ const resolveReportYear = (book, entries = []) => {
 };
 
 const buildReportPage = ({ book, entriesByNumber, pageNumber, reportPageNumber, totalReportPages, year }) => {
-  const reportYear = year || (book?.appointment_date
-    ? new Date(`${book.appointment_date}T00:00:00`).getFullYear()
-    : new Date().getFullYear());
+  const firstEntryNumber = (pageNumber - 1) * 5 + 1;
+  const pageEntryNumbers = new Set(Array.from({ length: 5 }, (_, index) => firstEntryNumber + index));
+  const pageEntries = [...entriesByNumber.entries()]
+    .filter(([entryNumber]) => pageEntryNumbers.has(entryNumber))
+    .map(([, entry]) => entry);
+  const reportYear = year || resolveReportYear(book, pageEntries);
   const appointmentDate = formatReportDate(book?.appointment_date);
   const expirationDate = formatReportDate(book?.expiration_date);
-  const firstEntryNumber = (pageNumber - 1) * 5 + 1;
   const rows = Array.from({ length: 5 }, (_, index) => {
     const entryNumber = firstEntryNumber + index;
     return buildReportRow(entriesByNumber.get(entryNumber), entryNumber);
@@ -205,8 +213,6 @@ const buildReportHtml = ({ title, book, entries, pageNumbers }) => {
   const entriesByNumber = new Map(
     entries.map((entry) => [Number(entry.entry_number), entry])
   );
-  const year = resolveReportYear(book, entries);
-
   const pages = pageNumbers
     .map((pageNumber, index) =>
       buildReportPage({
@@ -215,7 +221,6 @@ const buildReportHtml = ({ title, book, entries, pageNumbers }) => {
         pageNumber,
         reportPageNumber: index + 1,
         totalReportPages: pageNumbers.length,
-        year,
       })
     )
     .join('');
@@ -235,22 +240,22 @@ const buildReportHtml = ({ title, book, entries, pageNumbers }) => {
     .page-book-line { display: flex; justify-content: flex-end; gap: 14px; margin-bottom: 4px; font: 12px Arial, sans-serif; }
     .register-line, .appointment-line { margin: 0; font: 12px Arial, sans-serif; }
     .appointment-line { margin-bottom: 16px; }
-    .register-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11px; line-height: 1.05; }
-    .register-table th, .register-table td { border: 1px solid #000; vertical-align: top; text-align: center; padding: 2px 3px; white-space: pre-line; word-break: break-word; }
-    .register-table th { height: 62px; font-weight: 700; }
+    .register-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10px; line-height: 1.08; word-spacing: normal; }
+    .register-table th, .register-table td { border: 1px solid #000; vertical-align: top; text-align: center; padding: 2px; white-space: pre-line; word-break: normal; overflow-wrap: break-word; hyphens: auto; }
+    .register-table th { height: 58px; font-weight: 700; }
     .register-table td { height: 34px; }
-    .register-table th:nth-child(1), .register-table td:nth-child(1) { width: 4.1%; }
-    .register-table th:nth-child(2), .register-table td:nth-child(2) { width: 17.5%; }
-    .register-table th:nth-child(3), .register-table td:nth-child(3) { width: 17%; }
-    .register-table th:nth-child(4), .register-table td:nth-child(4) { width: 12.3%; }
-    .register-table th:nth-child(5), .register-table td:nth-child(5) { width: 12.8%; }
-    .register-table th:nth-child(6), .register-table td:nth-child(6) { width: 6.9%; }
-    .register-table th:nth-child(7), .register-table td:nth-child(7) { width: 9.1%; }
-    .register-table th:nth-child(8), .register-table td:nth-child(8) { width: 8.2%; }
-    .register-table th:nth-child(9), .register-table td:nth-child(9) { width: 11.8%; }
+    .register-table th:nth-child(1), .register-table td:nth-child(1) { width: 4%; }
+    .register-table th:nth-child(2), .register-table td:nth-child(2) { width: 16%; }
+    .register-table th:nth-child(3), .register-table td:nth-child(3) { width: 16%; }
+    .register-table th:nth-child(4), .register-table td:nth-child(4) { width: 12%; }
+    .register-table th:nth-child(5), .register-table td:nth-child(5) { width: 13%; }
+    .register-table th:nth-child(6), .register-table td:nth-child(6) { width: 8%; }
+    .register-table th:nth-child(7), .register-table td:nth-child(7) { width: 8%; }
+    .register-table th:nth-child(8), .register-table td:nth-child(8) { width: 8%; }
+    .register-table th:nth-child(9), .register-table td:nth-child(9) { width: 15%; }
     .entry-no { text-align: center; }
     .certification { margin: 16px 0 0 0.72in; font-size: 13px; }
-    .signature { margin-top: 24px; margin-right: 0.75in; text-align: right; font-size: 12px; }
+    .signature { width: max-content; min-width: 2.7in; margin-top: 24px; margin-right: 0.75in; margin-left: auto; text-align: center; font-size: 12px; }
     .signature p { margin: 0; }
     footer { position: absolute; right: 0.35in; bottom: 0.1in; font-size: 14px; color: #666; }
   </style>
@@ -260,6 +265,7 @@ const buildReportHtml = ({ title, book, entries, pageNumbers }) => {
 };
 
 export default function NotarialEntries() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedBookId = searchParams.get('bookId');
   const selectedBookNumber = searchParams.get('bookNumber');
@@ -273,12 +279,9 @@ export default function NotarialEntries() {
   const [remarksFilter, setRemarksFilter] = useState('all');
   const [pageSearch, setPageSearch] = useState('');
   const [pageNumberFilter, setPageNumberFilter] = useState('all');
-  const [notarizationDate, setNotarizationDate] = useState('');
   const [pageSize, setPageSize] = useState(5);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isSubmittingEntry, setIsSubmittingEntry] = useState(false);
-  const [entrySubmitError, setEntrySubmitError] = useState('');
   const [page, setPage] = useState(1);
+  const [archivedEntries, setArchivedEntries] = useState([]);
 
   const [editingEntry, setEditingEntry] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -288,6 +291,10 @@ export default function NotarialEntries() {
   const [successMessage, setSuccessMessage] = useState('');
   const [archiveConfirm, setArchiveConfirm] = useState({ open: false, entryId: null });
   const [isArchiving, setIsArchiving] = useState(false);
+  const [addSlot, setAddSlot] = useState(null);
+  const [isAddingSlotEntry, setIsAddingSlotEntry] = useState(false);
+  const [addSlotError, setAddSlotError] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
 
   const pageSizeOptions = [5, 105, 525];
 
@@ -301,24 +308,78 @@ export default function NotarialEntries() {
     setPageNumberFilter('all');
   }, [selectedBookId]);
 
-  const openPrintableReport = useCallback((filename, html) => {
-    const reportWindow = window.open('', '_blank');
-    if (reportWindow) {
-      reportWindow.document.open();
-      reportWindow.document.write(html);
-      reportWindow.document.close();
-      reportWindow.focus();
-      reportWindow.setTimeout(() => reportWindow.print(), 250);
-      return;
-    }
+  const openPrintableReport = useCallback(async (filename, html) => {
+    setReportBusy(true);
+    const previousActiveElement = document.activeElement;
+    let frame = null;
+    let cleanupTimer = null;
 
-    const blob = new Blob([html], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    const cleanup = () => {
+      if (cleanupTimer) window.clearTimeout(cleanupTimer);
+      if (frame?.parentNode) frame.parentNode.removeChild(frame);
+      setReportBusy(false);
+      window.setTimeout(() => {
+        if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
+          previousActiveElement.focus({ preventScroll: true });
+        } else {
+          window.focus();
+        }
+      }, 0);
+    };
+
+    try {
+      frame = document.createElement('iframe');
+      frame.title = filename.replace(/\.html$/i, '');
+      frame.setAttribute('aria-hidden', 'true');
+      frame.style.position = 'fixed';
+      frame.style.right = '0';
+      frame.style.bottom = '0';
+      frame.style.width = '1px';
+      frame.style.height = '1px';
+      frame.style.border = '0';
+      frame.style.opacity = '0';
+      frame.style.pointerEvents = 'none';
+      document.body.appendChild(frame);
+
+      const printDocument = frame.contentDocument || frame.contentWindow?.document;
+      if (!printDocument || !frame.contentWindow) {
+        throw new Error('Report print frame is unavailable.');
+      }
+
+      printDocument.open();
+      printDocument.write(html);
+      printDocument.close();
+
+      await new Promise((resolve) => {
+        const finish = () => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+        if (printDocument.readyState === 'complete') {
+          finish();
+          return;
+        }
+        frame.addEventListener('load', finish, { once: true });
+      });
+
+      if (printDocument.fonts?.ready) {
+        await printDocument.fonts.ready;
+      }
+
+      const reportWindow = frame.contentWindow;
+      const handleAfterPrint = () => cleanup();
+      reportWindow.addEventListener('afterprint', handleAfterPrint, { once: true });
+      cleanupTimer = window.setTimeout(cleanup, 4000);
+      reportWindow.focus();
+      reportWindow.print();
+    } catch {
+      cleanup();
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setError('Print preview could not open, so the report was downloaded instead.');
+    }
   }, []);
 
   const fetchEntriesData = useCallback(async () => {
@@ -330,11 +391,13 @@ export default function NotarialEntries() {
         setEntries([]);
         return;
       }
-      const [entriesResponse, booksResponse] = await Promise.all([
+      const [entriesResponse, archivedEntriesResponse, booksResponse] = await Promise.all([
         AxiosInstance.get(`/entries/?book=${encodeURIComponent(selectedBookId)}`),
+        AxiosInstance.get(`/entries/?book=${encodeURIComponent(selectedBookId)}&archived=true`),
         AxiosInstance.get('/books/'),
       ]);
       setEntries(entriesResponse.data || []);
+      setArchivedEntries(archivedEntriesResponse.data || []);
       setBooks(booksResponse.data || []);
     } catch {
       setError('Unable to load entries. Please check your backend service.');
@@ -384,9 +447,13 @@ export default function NotarialEntries() {
         }
 
         // Book already chosen → load only that book's entries (active records).
-        const entriesResponse = await AxiosInstance.get(`/entries/?book=${encodeURIComponent(selectedBookId)}`);
+        const [entriesResponse, archivedEntriesResponse] = await Promise.all([
+          AxiosInstance.get(`/entries/?book=${encodeURIComponent(selectedBookId)}`),
+          AxiosInstance.get(`/entries/?book=${encodeURIComponent(selectedBookId)}&archived=true`),
+        ]);
         if (!isMounted) return;
         setEntries(entriesResponse.data || []);
+        setArchivedEntries(archivedEntriesResponse.data || []);
       } catch {
         if (isMounted) {
           setError('Unable to load entries. Please check your backend service.');
@@ -429,13 +496,32 @@ export default function NotarialEntries() {
     }
   };
 
-  const handleCreateEntry = async (payload) => {
+  const handleEditEntry = (entryId) => {
+    const found = entries.find((e) => e.id === entryId);
+    if (found) {
+      setEditingEntry(found);
+      setEditSubmitError('');
+      setIsEditModalOpen(true);
+    }
+  };
+
+  const handleAddToDeletedSlot = (row) => {
+    setAddSlot(row);
+    setAddSlotError('');
+  };
+
+  const handleSubmitDeletedSlotEntry = async (payload) => {
+    if (!addSlot) return false;
     try {
-      setIsSubmittingEntry(true);
-      setEntrySubmitError('');
-      await AxiosInstance.post('/entries/', payload);
-      setIsAddModalOpen(false);
-      setSuccessMessage('Entry created successfully.');
+      setIsAddingSlotEntry(true);
+      setAddSlotError('');
+      await AxiosInstance.post(`/entries/${addSlot.sourceId}/replace-deleted/`, {
+        ...payload,
+        book: Number(addSlot.bookId),
+        entry_number: Number(addSlot.entry_number),
+      });
+      setAddSlot(null);
+      setSuccessMessage(`Entry #${addSlot.entry_number} has been added to the deleted slot.`);
       await fetchEntriesData();
       return true;
     } catch (requestError) {
@@ -446,20 +532,11 @@ export default function NotarialEntries() {
           : responseData?.non_field_errors?.[0] ||
             responseData?.detail ||
             Object.values(responseData || {})?.[0]?.[0] ||
-            'Unable to create entry.';
-      setEntrySubmitError(apiMessage);
+            'Unable to add entry to this deleted slot.';
+      setAddSlotError(apiMessage);
       return false;
     } finally {
-      setIsSubmittingEntry(false);
-    }
-  };
-
-  const handleEditEntry = (entryId) => {
-    const found = entries.find((e) => e.id === entryId);
-    if (found) {
-      setEditingEntry(found);
-      setEditSubmitError('');
-      setIsEditModalOpen(true);
+      setIsAddingSlotEntry(false);
     }
   };
 
@@ -491,7 +568,7 @@ export default function NotarialEntries() {
 
   const pageOptions = useMemo(() => {
     const pages = new Set();
-    for (const entry of entries) {
+    for (const entry of [...entries, ...archivedEntries]) {
       const pageNumber = entry.page?.page_number;
       if (pageNumber !== undefined && pageNumber !== null && pageNumber !== '') {
         pages.add(String(pageNumber));
@@ -504,7 +581,7 @@ export default function NotarialEntries() {
         value: pageNumber,
         label: `Page ${pageNumber}`,
       }));
-  }, [entries]);
+  }, [archivedEntries, entries]);
 
   const selectPageByNumber = useCallback((value) => {
     const normalized = String(value || '').trim();
@@ -517,25 +594,52 @@ export default function NotarialEntries() {
 
   const filteredEntries = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
+    const formatSearchDateTime = (value) => {
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '';
+      return [
+        toDateInputValue(value),
+        date.toLocaleDateString(),
+        date.toLocaleString(),
+        date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+      ].join(' ');
+    };
 
-    return entries
+    return [...entries, ...archivedEntries]
       .filter((entry) => String(entry.book) === String(selectedBookId))
       .sort((a, b) => a.entry_number - b.entry_number)
       .filter((entry) => {
+        if (entry.is_archived) {
+          const archivedFields = [
+            entry.entry_number,
+            entry.book_number,
+            entry.page?.page_number,
+            'archived archived slot archive slot',
+            formatSearchDateTime(entry.date_time),
+            formatSearchDateTime(entry.archived_at),
+          ].join(' ').toLowerCase();
+          const matchesPage =
+            pageNumberFilter === 'all'
+              ? true
+              : String(entry.page?.page_number || '') === String(pageNumberFilter);
+          return matchesPage && (normalizedSearch.length === 0 || archivedFields.includes(normalizedSearch));
+        }
+
         const matchesType = typeFilter === 'all' ? true : entry.notarial_type === typeFilter;
         const matchesRemarks = remarksFilter === 'all' ? true : entry.remarks === remarksFilter;
         const matchesPage =
           pageNumberFilter === 'all'
             ? true
             : String(entry.page?.page_number || '') === String(pageNumberFilter);
-        const matchesDate =
-          !notarizationDate || toDateInputValue(entry.date_time) === notarizationDate;
 
         const title = (entry.title || '').toLowerCase();
         const parties = Array.isArray(entry.parties) ? entry.parties.map((p) => p?.name || '').join(' ').toLowerCase() : '';
         const witnesses = Array.isArray(entry.witnesses) ? entry.witnesses.map((w) => w?.name || '').join(' ').toLowerCase() : '';
         const orNumber = String(entry.or_number || '').toLowerCase();
         const entryNo = String(entry.entry_number || '');
+        const notarizationDateText = formatSearchDateTime(entry.date_time).toLowerCase();
 
         const matchesSearch =
           normalizedSearch.length === 0 ||
@@ -543,28 +647,31 @@ export default function NotarialEntries() {
           entryNo.includes(normalizedSearch) ||
           parties.includes(normalizedSearch) ||
           witnesses.includes(normalizedSearch) ||
-          orNumber.includes(normalizedSearch);
+          orNumber.includes(normalizedSearch) ||
+          notarizationDateText.includes(normalizedSearch);
 
-        return matchesType && matchesRemarks && matchesPage && matchesDate && matchesSearch;
+        return matchesType && matchesRemarks && matchesPage && matchesSearch;
       });
-  }, [entries, selectedBookId, typeFilter, remarksFilter, pageNumberFilter, notarizationDate, searchTerm]);
+  }, [archivedEntries, entries, selectedBookId, typeFilter, remarksFilter, pageNumberFilter, searchTerm]);
 
   const rows = useMemo(() => {
     return filteredEntries.map((entry) => {
       return {
         id: entry.id,
+        is_archived: Boolean(entry.is_archived),
+        is_deleted: Boolean(entry.is_deleted),
         entry_number: entry.entry_number,
         book_number: entry.book_number || entry.book,
         page_number: entry.page?.page_number || '—',
-        title: entry.title || '—',
+        title: entry.is_deleted ? 'Deleted archived slot' : entry.is_archived ? 'Archived slot' : entry.title || '—',
         date_time: new Date(entry.date_time).toLocaleString(),
-        notarial_type: notarialTypeLabel[entry.notarial_type] || entry.notarial_type,
-        fees: Number(entry.fees).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        or_number: entry.or_number,
-        remarks: remarksLabel[entry.remarks] || entry.remarks,
-        parties: formatPeople(entry.parties),
-        witnesses: formatPeople(entry.witnesses),
-        party_ids: formatPartyIdsOnly(entry.parties),
+        notarial_type: entry.is_deleted ? 'Deleted' : entry.is_archived ? 'Archived' : notarialTypeLabel[entry.notarial_type] || entry.notarial_type,
+        fees: entry.is_archived ? '' : Number(entry.fees).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        or_number: entry.is_archived ? '' : entry.or_number,
+        remarks: entry.is_deleted ? 'Slot preserved' : entry.is_archived ? 'Archived slot' : remarksLabel[entry.remarks] || entry.remarks,
+        parties: entry.is_deleted ? 'Deleted in archive; slot preserved' : entry.is_archived ? 'Moved to archive' : formatPeople(entry.parties),
+        witnesses: entry.is_archived ? '—' : formatPeople(entry.witnesses),
+        party_ids: entry.is_archived ? '—' : formatPartyIdsOnly(entry.parties),
         sourceId: entry.id,
         bookId: entry.book,
       };
@@ -586,15 +693,16 @@ export default function NotarialEntries() {
 
   useEffect(() => {
     if (!selectedBookId) return;
-    if (!Array.isArray(entries) || entries.length === 0) return;
+    const allEntries = [...entries, ...archivedEntries];
+    if (!Array.isArray(allEntries) || allEntries.length === 0) return;
     if (pageSize !== 5) return;
-    const maxEntry = Math.max(...entries.map((e) => Number(e.entry_number) || 1));
+    const maxEntry = Math.max(...allEntries.map((e) => Number(e.entry_number) || 1));
     const activePage = Math.max(1, Math.ceil(maxEntry / 5));
     setPage((prev) => (prev === 1 ? activePage : prev));
-  }, [entries, pageSize, selectedBookId]);
+  }, [archivedEntries, entries, pageSize, selectedBookId]);
 
-  function exportPage() {
-    if (!viewingBook) return;
+  async function exportPage() {
+    if (!viewingBook || reportBusy) return;
     const pageNumber =
       pageNumberFilter !== 'all'
         ? Number(pageNumberFilter)
@@ -606,14 +714,14 @@ export default function NotarialEntries() {
       pageNumbers: [pageNumber],
     });
 
-    openPrintableReport(
+    await openPrintableReport(
       `nrms-book-${viewingBook.book_number}-page-${pageNumber}.html`,
       html
     );
   }
 
-  function exportBook() {
-    if (!viewingBook) return;
+  async function exportBook() {
+    if (!viewingBook || reportBusy) return;
     const totalBookPages =
       Number(viewingBook.total_pages) ||
       Math.max(1, ...entries.map((entry) => Number(entry.page?.page_number) || 1));
@@ -625,7 +733,7 @@ export default function NotarialEntries() {
       pageNumbers,
     });
 
-    openPrintableReport(
+    await openPrintableReport(
       `nrms-book-${viewingBook.book_number}-complete-register.html`,
       html
     );
@@ -639,15 +747,15 @@ export default function NotarialEntries() {
         subtitle="Review, manage, and audit all official notarized records within the system."
         actions={
           <>
-            <AppButton variant="outline" onClick={exportPage} disabled={!viewingBook || loading}>
+            <AppButton variant="outline" onClick={exportPage} disabled={!viewingBook || loading || reportBusy}>
               <Download className="mr-1 h-4 w-4" />
-              Export Page
+              {reportBusy ? 'Preparing...' : 'Export Page'}
             </AppButton>
-            <AppButton variant="outline" onClick={exportBook} disabled={!viewingBook || loading}>
+            <AppButton variant="outline" onClick={exportBook} disabled={!viewingBook || loading || reportBusy}>
               <Download className="mr-1 h-4 w-4" />
-              Export Book
+              {reportBusy ? 'Preparing...' : 'Export Book'}
             </AppButton>
-            <AppButton variant="danger" onClick={() => setIsAddModalOpen(true)} disabled={!viewingBook}>
+            <AppButton variant="danger" onClick={() => navigate('/workflow', { state: { startAt: 'auto' } })}>
               + New Entry
             </AppButton>
           </>
@@ -666,7 +774,13 @@ export default function NotarialEntries() {
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-100 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950 md:grid-cols-6">
+      {reportBusy ? (
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+          Preparing print preview...
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-100 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950 md:grid-cols-5">
         <label className="space-y-1 text-sm text-slate-700 dark:text-slate-200">
           <span>Page</span>
           <Input
@@ -737,21 +851,10 @@ export default function NotarialEntries() {
         <label className="space-y-1 text-sm text-slate-700 dark:text-slate-200 md:col-span-2">
           <span>Quick Search</span>
           <Input
-            placeholder="Entry #, title, parties, witnesses, OR #"
+            placeholder="Entry #, title, parties, witnesses, OR #, date"
             value={searchTerm}
             onChange={(event) => {
               setSearchTerm(event.target.value);
-              setPage(1);
-            }}
-          />
-        </label>
-        <label className="space-y-1 text-sm text-slate-700 dark:text-slate-200">
-          <span>Date of Notarization</span>
-          <Input
-            type="date"
-            value={notarizationDate}
-            onChange={(event) => {
-              setNotarizationDate(event.target.value);
               setPage(1);
             }}
           />
@@ -764,22 +867,22 @@ export default function NotarialEntries() {
 
       <Card className="hidden md:block">
         <CardContent className="overflow-x-auto p-1">
-          <Table>
+          <Table className="min-w-[1500px]">
             <TableHeader>
               <TableRow>
-                <TableHead>Book</TableHead>
-                <TableHead>Page</TableHead>
-                <TableHead>Entry #</TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead>Parties & Addresses</TableHead>
-                <TableHead>Witnesses</TableHead>
-                <TableHead>Party IDs</TableHead>
-                <TableHead>Date/Time</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Fees</TableHead>
-                <TableHead>OR #</TableHead>
-                <TableHead>Remarks</TableHead>
-                <TableHead>Actions</TableHead>
+                <TableHead className="w-20">Book</TableHead>
+                <TableHead className="w-16">Page</TableHead>
+                <TableHead className="w-20">Entry #</TableHead>
+                <TableHead className="w-64">Title</TableHead>
+                <TableHead className="w-72">Parties & Addresses</TableHead>
+                <TableHead className="w-56">Witnesses</TableHead>
+                <TableHead className="w-56">Party IDs</TableHead>
+                <TableHead className="w-44">Date/Time</TableHead>
+                <TableHead className="w-40">Type</TableHead>
+                <TableHead className="w-28">Fees</TableHead>
+                <TableHead className="w-28">OR #</TableHead>
+                <TableHead className="w-40">Remarks</TableHead>
+                <TableHead className="w-24">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -799,51 +902,71 @@ export default function NotarialEntries() {
                 paginatedRows.map((row) => (
                   <TableRow
                     key={row.id}
-                    className={`border-b border-slate-100 dark:border-slate-800 odd:bg-white even:bg-slate-50/40 dark:odd:bg-slate-950 dark:even:bg-slate-900/40 ${BRAND.rowHoverTint}`}
+                    className={`border-b border-slate-100 dark:border-slate-800 ${
+                      row.is_archived
+                        ? 'bg-slate-100/80 text-slate-500 dark:bg-slate-900/70'
+                        : `odd:bg-white even:bg-slate-50/40 dark:odd:bg-slate-950 dark:even:bg-slate-900/40 ${BRAND.rowHoverTint}`
+                    }`}
                   >
-                    <TableCell>{row.book_number}</TableCell>
-                    <TableCell>{row.page_number}</TableCell>
-                    <TableCell className="font-semibold text-red-700 dark:text-red-400">
+                    <TableCell className="whitespace-nowrap">{row.book_number}</TableCell>
+                    <TableCell className="whitespace-nowrap">{row.page_number}</TableCell>
+                    <TableCell className="whitespace-nowrap font-semibold text-red-700 dark:text-red-400">
                       {row.entry_number}
                     </TableCell>
-                    <TableCell className="min-w-48 font-medium text-slate-900 dark:text-white">
+                    <TableCell className="whitespace-normal break-words font-medium text-slate-900 dark:text-white">
                       {row.title}
                     </TableCell>
-                    <TableCell className="min-w-64 max-w-64 whitespace-normal break-words">{row.parties || '—'}</TableCell>
-                    <TableCell className="min-w-56 max-w-56 whitespace-normal break-words">{row.witnesses || '—'}</TableCell>
-                    <TableCell className="min-w-48 max-w-48 whitespace-pre-line break-words text-xs text-slate-600 dark:text-slate-400">
+                    <TableCell className="whitespace-normal break-words">{row.parties || '—'}</TableCell>
+                    <TableCell className="whitespace-normal break-words">{row.witnesses || '—'}</TableCell>
+                    <TableCell className="whitespace-pre-line break-words text-xs text-slate-600 dark:text-slate-400">
                       {row.party_ids || '—'}
                     </TableCell>
-                    <TableCell className="min-w-40">{row.date_time || '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap">{row.date_time || '—'}</TableCell>
                     <TableCell>
                       {row.notarial_type && <Badge variant="outline">{row.notarial_type}</Badge>}
                     </TableCell>
-                    <TableCell>{row.fees ? `₱ ${row.fees}` : '—'}</TableCell>
-                    <TableCell>{row.or_number || '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap">{row.fees ? `₱ ${row.fees}` : '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap">{row.or_number || '—'}</TableCell>
                     <TableCell>
                       {row.remarks && (
                         <Badge variant={row.remarks === 'Copy Retained' ? 'success' : 'default'}>{row.remarks}</Badge>
                       )}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          title="Edit entry"
-                          className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-                          onClick={() => handleEditEntry(row.sourceId)}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          title="Archive entry"
-                          className="rounded-md p-1.5 text-amber-600 hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-950/30 dark:hover:text-amber-400"
-                          onClick={() => handleRequestArchive(row.sourceId)}
-                        >
-                          <Archive className="h-4 w-4" />
-                        </button>
-                      </div>
+                      {row.is_archived ? (
+                        row.is_deleted ? (
+                          <button
+                            type="button"
+                            title="Add notarial entry to this deleted slot"
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+                            onClick={() => handleAddToDeletedSlot(row)}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Add
+                          </button>
+                        ) : (
+                          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Archived</span>
+                        )
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            title="Edit entry"
+                            className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                            onClick={() => handleEditEntry(row.sourceId)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            title="Archive entry"
+                            className="rounded-md p-1.5 text-amber-600 hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-950/30 dark:hover:text-amber-400"
+                            onClick={() => handleRequestArchive(row.sourceId)}
+                          >
+                            <Archive className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))
@@ -864,7 +987,7 @@ export default function NotarialEntries() {
           </Card>
         ) : (
           paginatedRows.map((row) => (
-            <Card key={row.id}>
+            <Card key={row.id} className={row.is_archived ? 'border-dashed bg-slate-50 opacity-80 dark:bg-slate-900/70' : ''}>
               <CardContent className="space-y-2 p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -911,20 +1034,37 @@ export default function NotarialEntries() {
                 </div>
 
                 <div className="flex items-center justify-end gap-1 pt-1">
-                  <button
-                    type="button"
-                    className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-                    onClick={() => handleEditEntry(row.sourceId)}
-                  >
-                    <Edit className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md p-1.5 text-amber-600 hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-950/30 dark:hover:text-amber-400"
-                    onClick={() => handleRequestArchive(row.sourceId)}
-                  >
-                    <Archive className="h-4 w-4" />
-                  </button>
+                  {row.is_archived ? (
+                    row.is_deleted ? (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+                        onClick={() => handleAddToDeletedSlot(row)}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Add
+                      </button>
+                    ) : (
+                      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Archived</span>
+                    )
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                        onClick={() => handleEditEntry(row.sourceId)}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md p-1.5 text-amber-600 hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-amber-950/30 dark:hover:text-amber-400"
+                        onClick={() => handleRequestArchive(row.sourceId)}
+                      >
+                        <Archive className="h-4 w-4" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -955,18 +1095,6 @@ export default function NotarialEntries() {
         </div>
       </div>
 
-      {isAddModalOpen ? (
-        <AddEntryModal
-          isOpen={isAddModalOpen}
-          onClose={() => setIsAddModalOpen(false)}
-          onSubmit={handleCreateEntry}
-          books={books}
-          defaultBookId={selectedBookId}
-          submitting={isSubmittingEntry}
-          errorMessage={entrySubmitError}
-        />
-      ) : null}
-
       {isEditModalOpen ? (
         <EditEntryModal
           isOpen={isEditModalOpen}
@@ -979,6 +1107,23 @@ export default function NotarialEntries() {
           entry={editingEntry}
           submitting={isUpdatingEntry}
           errorMessage={editSubmitError}
+        />
+      ) : null}
+
+      {addSlot ? (
+        <AddEntryModal
+          isOpen={Boolean(addSlot)}
+          onClose={() => {
+            setAddSlot(null);
+            setAddSlotError('');
+          }}
+          onSubmit={handleSubmitDeletedSlotEntry}
+          books={books}
+          defaultBookId={addSlot.bookId}
+          defaultEntryNumber={addSlot.entry_number}
+          lockedSlot
+          submitting={isAddingSlotEntry}
+          errorMessage={addSlotError}
         />
       ) : null}
 

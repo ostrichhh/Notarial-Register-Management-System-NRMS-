@@ -16,7 +16,9 @@ const MAX_ENTRIES_PER_BOOK = 525;
 export default function NotarialRegisterBooks() {
   const navigate = useNavigate();
   const [books, setBooks] = useState([]);
+  const [archivedBooks, setArchivedBooks] = useState([]);
   const [entries, setEntries] = useState([]);
+  const [archivedEntries, setArchivedEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -32,12 +34,16 @@ export default function NotarialRegisterBooks() {
     try {
       setLoading(true);
       setError('');
-      const [booksResponse, entriesResponse] = await Promise.all([
+      const [booksResponse, entriesResponse, archivedBooksResponse, archivedEntriesResponse] = await Promise.all([
         AxiosInstance.get('/books/'),
         AxiosInstance.get('/entries/?lite=true'),
+        AxiosInstance.get('/books/?archived=true'),
+        AxiosInstance.get('/entries/?lite=true&archived=true'),
       ]);
       setBooks(booksResponse.data || []);
       setEntries(entriesResponse.data || []);
+      setArchivedBooks(archivedBooksResponse.data || []);
+      setArchivedEntries(archivedEntriesResponse.data || []);
     } catch {
       setError('Failed to load register books. Please check your backend connection.');
     } finally {
@@ -50,9 +56,11 @@ export default function NotarialRegisterBooks() {
 
     const loadInitialData = async () => {
       try {
-        const [booksResponse, entriesResponse] = await Promise.all([
+        const [booksResponse, entriesResponse, archivedBooksResponse, archivedEntriesResponse] = await Promise.all([
           AxiosInstance.get('/books/'),
           AxiosInstance.get('/entries/?lite=true'),
+          AxiosInstance.get('/books/?archived=true'),
+          AxiosInstance.get('/entries/?lite=true&archived=true'),
         ]);
 
         if (!isMounted) {
@@ -61,6 +69,8 @@ export default function NotarialRegisterBooks() {
 
         setBooks(booksResponse.data || []);
         setEntries(entriesResponse.data || []);
+        setArchivedBooks(archivedBooksResponse.data || []);
+        setArchivedEntries(archivedEntriesResponse.data || []);
       } catch {
         if (isMounted) {
           setError('Failed to load register books. Please check your backend connection.');
@@ -87,6 +97,14 @@ export default function NotarialRegisterBooks() {
     }, {});
   }, [entries]);
 
+  const archivedEntriesByBook = useMemo(() => {
+    return archivedEntries.reduce((accumulator, entry) => {
+      const bookId = entry.book;
+      accumulator[bookId] = (accumulator[bookId] || 0) + 1;
+      return accumulator;
+    }, {});
+  }, [archivedEntries]);
+
   const activeBook = useMemo(() => {
     return books.find((book) => {
       const count = entriesByBook[book.id] || 0;
@@ -95,23 +113,19 @@ export default function NotarialRegisterBooks() {
   }, [books, entriesByBook]);
 
   const sortedBooks = useMemo(() => {
-    return [...books].sort((a, b) => {
+    return [...books, ...archivedBooks].sort((a, b) => {
       const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
       const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
       if (aTime !== bTime) return bTime - aTime; // LIFO: newest first
       return b.id - a.id;
     });
-  }, [books]);
+  }, [archivedBooks, books]);
 
   const visibleBooks = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     if (!q) return sortedBooks;
     return sortedBooks.filter((book) => {
-      return (
-        String(book.book_number || '').toLowerCase().includes(q) ||
-        String(book.appointment_date || '').toLowerCase().includes(q) ||
-        String(book.expiration_date || '').toLowerCase().includes(q)
-      );
+      return String(book.book_number || '').toLowerCase().includes(q);
     });
   }, [sortedBooks, searchTerm]);
 
@@ -224,7 +238,7 @@ export default function NotarialRegisterBooks() {
         <div className="relative w-full max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
-            placeholder="Search book number or date…"
+            placeholder="Search book number…"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
             className="pl-9"
@@ -234,14 +248,14 @@ export default function NotarialRegisterBooks() {
 
       {loading ? (
         <p className="text-sm text-slate-600">Loading books...</p>
-      ) : books.length === 0 ? (
+      ) : sortedBooks.length === 0 ? (
         <p className="text-sm text-slate-600">No register books found.</p>
       ) : visibleBooks.length === 0 ? (
         <p className="text-sm text-slate-600">No register books match your search.</p>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {visibleBooks.map((book) => {
-            const count = entriesByBook[book.id] || 0;
+            const count = book.is_archived ? archivedEntriesByBook[book.id] || 0 : entriesByBook[book.id] || 0;
             const isFull = count >= MAX_ENTRIES_PER_BOOK;
             const progressPercent = Math.min(100, Math.round((count / MAX_ENTRIES_PER_BOOK) * 100));
 

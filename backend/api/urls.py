@@ -10,13 +10,15 @@ from .auth_views import (
     auth_me,
 )
 from .reports_views import generate_office_report
-from .views import AuditLogViewSet, BookViewSet, EntryViewSet, UserViewSet
+from .views import AuditLogViewSet, BookViewSet, ClientIntakeViewSet, EntryViewSet, UserViewSet, WorkflowDraftViewSet
 
 router = DefaultRouter()
 router.register(r'entries', EntryViewSet)
 router.register(r'books', BookViewSet)
 router.register(r'users', UserViewSet)
 router.register(r'audit-logs', AuditLogViewSet, basename='auditlog')
+router.register(r'client-intakes', ClientIntakeViewSet, basename='clientintake')
+router.register(r'workflow-drafts', WorkflowDraftViewSet, basename='workflowdraft')
 
 urlpatterns = [
     path('auth/login/', LoginView.as_view()),

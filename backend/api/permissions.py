@@ -9,3 +9,13 @@ class IsAdminOnly(BasePermission):
         if not user or not user.is_authenticated:
             return False
         return user.role == 'ADMIN'
+
+
+class IsAdminOrAttorney(BasePermission):
+    """Admin and Attorney roles."""
+
+    def has_permission(self, request, view):
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return False
+        return user.role in ('ADMIN', 'ATTORNEY')

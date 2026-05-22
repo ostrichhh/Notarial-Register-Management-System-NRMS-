@@ -1,11 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Bar,
-  BarChart,
+  Area,
+  AreaChart,
   CartesianGrid,
   Cell,
+  Line,
+  LineChart,
+  PolarAngleAxis,
+  PolarGrid,
+  PolarRadiusAxis,
   Pie,
   PieChart,
+  Radar,
+  RadarChart,
+  RadialBar,
+  RadialBarChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -28,7 +37,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/shadcn/Dialog';
-import { Progress } from './ui/shadcn/Progress';
 import { downloadOfficeReport } from '../lib/officeReport';
 import {
   monthlyFeeTotals,
@@ -40,6 +48,7 @@ import {
 import { cn } from '../lib/utils';
 
 const PIE_COLORS = ['#b91c1c', '#dc2626', '#78716c'];
+const MAX_BOOK_ENTRIES = 525;
 
 const REPORT_CATEGORY_LABELS = {
   notarial_acts: 'Notarial acts breakdown',
@@ -71,6 +80,114 @@ function formatPhp(n) {
   return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(v);
 }
 
+function formatPct(value) {
+  if (!Number.isFinite(value)) return '—';
+  return `${Math.round(value)}%`;
+}
+
+function toMonthKey(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthBuckets(monthsBack = 6) {
+  const now = new Date();
+  return Array.from({ length: monthsBack }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (monthsBack - 1 - index), 1);
+    return {
+      key: toMonthKey(date),
+      label: date.toLocaleDateString('en-US', { month: 'short' }),
+      entries: 0,
+      revenue: 0,
+      intakes: 0,
+      completed: 0,
+      ready: 0,
+      finalized: 0,
+    };
+  });
+}
+
+function buildActivitySeries(entries, intakes, drafts) {
+  const buckets = monthBuckets(6);
+  const lookup = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+
+  for (const entry of entries) {
+    if (entry.is_archived) continue;
+    const bucket = lookup.get(toMonthKey(entry.date_time));
+    if (!bucket) continue;
+    bucket.entries += 1;
+    bucket.revenue += Number(entry.fees) || 0;
+    bucket.completed += 1;
+    bucket.finalized += 1;
+  }
+
+  for (const intake of intakes) {
+    const bucket = lookup.get(toMonthKey(intake.created_at || intake.scheduled_date));
+    if (!bucket) continue;
+    bucket.intakes += 1;
+    if (intake.status === 'COMPLETED') bucket.completed += 1;
+  }
+
+  for (const draft of drafts) {
+    const bucket = lookup.get(toMonthKey(draft.finalized_at || draft.updated_at || draft.created_at));
+    if (!bucket) continue;
+    if (draft.status === 'READY') bucket.ready += 1;
+    if (draft.status === 'FINALIZED') bucket.finalized += 1;
+  }
+
+  return buckets;
+}
+
+function buildRemarksSeries(entries) {
+  const buckets = monthBuckets(6).map((bucket) => ({
+    key: bucket.key,
+    label: bucket.label,
+    cr: 0,
+    ncr: 0,
+  }));
+  const lookup = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+
+  for (const entry of entries) {
+    if (entry.is_archived) continue;
+    const bucket = lookup.get(toMonthKey(entry.date_time));
+    if (!bucket) continue;
+    if (entry.remarks === 'CR') bucket.cr += 1;
+    if (entry.remarks === 'NCR') bucket.ncr += 1;
+  }
+
+  return buckets;
+}
+
+function AnalyticsMetric({ label, value, hint }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
+      <p className="mt-1 text-lg font-bold text-slate-900 dark:text-white">{value}</p>
+      {hint ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</p> : null}
+    </div>
+  );
+}
+
+function InsightCard({ title, description, metrics, children, className = '' }) {
+  return (
+    <Card className={className}>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {metrics.map((metric) => (
+            <AnalyticsMetric key={metric.label} {...metric} />
+          ))}
+        </div>
+        <div className="h-[240px] w-full">{children}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function BookFilterControl({ value, onSearchChange, onSelect, options, datalistId, className = '' }) {
   return (
     <label className={cn('space-y-1 text-sm text-slate-700 dark:text-slate-200', className)}>
@@ -78,7 +195,7 @@ function BookFilterControl({ value, onSearchChange, onSelect, options, datalistI
       <Input
         list={datalistId}
         value={value}
-        placeholder="Search book..."
+        placeholder="Search book number..."
         onChange={(event) => onSearchChange(event.target.value)}
         onBlur={(event) => onSelect(event.target.value)}
         onKeyDown={(event) => {
@@ -90,7 +207,7 @@ function BookFilterControl({ value, onSearchChange, onSelect, options, datalistI
       />
       <datalist id={datalistId}>
         {options.map((option) => (
-          <option key={option.value} value={option.label} />
+          <option key={option.value} value={option.searchLabel || option.label} />
         ))}
       </datalist>
     </label>
@@ -102,6 +219,8 @@ export default function Analytics() {
   const [err, setErr] = useState('');
   const [entries, setEntries] = useState([]);
   const [books, setBooks] = useState([]);
+  const [intakes, setIntakes] = useState([]);
+  const [drafts, setDrafts] = useState([]);
   const [selectedBookId, setSelectedBookId] = useState('all');
   const [bookSearch, setBookSearch] = useState('All books');
   const [revenuePeriod, setRevenuePeriod] = useState('monthly');
@@ -116,17 +235,27 @@ export default function Analytics() {
     setErr('');
     setLoading(true);
     try {
-      const [entriesResponse, booksResponse] = await Promise.all([
+      const [entriesResponse, archivedEntriesResponse, booksResponse, intakeResponse, draftResponse] = await Promise.all([
         AxiosInstance.get('/entries/?lite=true'),
+        AxiosInstance.get('/entries/?lite=true&archived=true'),
         AxiosInstance.get('/books/'),
+        AxiosInstance.get('/client-intakes/'),
+        AxiosInstance.get('/workflow-drafts/'),
       ]);
-      setEntries(Array.isArray(entriesResponse.data) ? entriesResponse.data : []);
+      setEntries([
+        ...(Array.isArray(entriesResponse.data) ? entriesResponse.data : []),
+        ...(Array.isArray(archivedEntriesResponse.data) ? archivedEntriesResponse.data : []),
+      ]);
       setBooks(Array.isArray(booksResponse.data) ? booksResponse.data : []);
+      setIntakes(Array.isArray(intakeResponse.data) ? intakeResponse.data : []);
+      setDrafts(Array.isArray(draftResponse.data) ? draftResponse.data : []);
     } catch (e) {
       const detail = e.response?.data?.detail || e.message || 'Could not load entries.';
       setErr(typeof detail === 'string' ? detail : JSON.stringify(detail));
       setEntries([]);
       setBooks([]);
+      setIntakes([]);
+      setDrafts([]);
     } finally {
       setLoading(false);
     }
@@ -142,13 +271,14 @@ export default function Analytics() {
   const total = entries.length || 1;
   const bookOptions = useMemo(
     () => [
-      { value: 'all', label: 'All books' },
+      { value: 'all', label: 'All books', searchLabel: 'All books' },
       ...books
         .slice()
         .sort((a, b) => String(a.book_number || '').localeCompare(String(b.book_number || ''), undefined, { numeric: true }))
         .map((book) => ({
           value: String(book.id),
           label: `Book ${book.book_number}`,
+          searchLabel: String(book.book_number || ''),
         })),
     ],
     [books]
@@ -162,9 +292,8 @@ export default function Analytics() {
     const normalized = String(rawValue || '').trim().toLowerCase();
     const match = bookOptions.find(
       (option) =>
-        option.label.toLowerCase() === normalized ||
-        option.value.toLowerCase() === normalized ||
-        option.label.toLowerCase().replace(/^book\s+/, '') === normalized
+        (option.value === 'all' && option.label.toLowerCase() === normalized) ||
+        option.searchLabel?.toLowerCase() === normalized
     );
     const next = match || bookOptions[0];
     setSelectedBookId(next.value);
@@ -179,13 +308,26 @@ export default function Analytics() {
   const volumeBars = useMemo(() => {
     const activePct = Math.round((active.length / total) * 100);
     const archivedPct = Math.round((archived.length / total) * 100);
-    const other = Math.max(0, 100 - activePct - archivedPct);
     return [
       { label: 'Active register', pct: activePct, tone: 'bg-red-700' },
       { label: 'Archived', pct: archivedPct, tone: 'bg-red-600/90' },
-      { label: 'Unclassified', pct: other, tone: 'bg-slate-400 dark:bg-slate-600' },
     ];
   }, [active.length, archived.length, total]);
+  const volumeRadialData = useMemo(
+    () => [
+      {
+        name: 'Active register',
+        value: active.length,
+        fill: '#b91c1c',
+      },
+      {
+        name: 'Archived',
+        value: archived.length,
+        fill: '#dc2626',
+      },
+    ],
+    [active.length, archived.length]
+  );
 
   const monthlySeries = useMemo(() => monthlyFeeTotals(entries, 6), [entries]);
   const quarterlySeries = useMemo(() => quarterlyFeeTotals(entries), [entries]);
@@ -204,8 +346,47 @@ export default function Analytics() {
   );
 
   const avgPerAct = revenueTotal / actsDenom;
+  const activitySeries = useMemo(() => buildActivitySeries(entries, intakes, drafts), [drafts, entries, intakes]);
+  const bookUtilization = useMemo(
+    () =>
+      books
+        .slice()
+        .sort((a, b) => String(a.book_number || '').localeCompare(String(b.book_number || ''), undefined, { numeric: true }))
+        .map((book) => {
+          const used = active.filter((entry) => String(entry.book) === String(book.id)).length;
+          return {
+            book: `B${book.book_number}`,
+            used,
+            remaining: Math.max(0, MAX_BOOK_ENTRIES - used),
+            utilization: Math.round((used / MAX_BOOK_ENTRIES) * 100),
+          };
+        })
+        .slice(-8),
+    [active, books]
+  );
+  const avgBookUtilization = bookUtilization.length
+    ? bookUtilization.reduce((sum, book) => sum + book.utilization, 0) / bookUtilization.length
+    : 0;
+  const busiestBook = bookUtilization.reduce((best, book) => (book.used > (best?.used || 0) ? book : best), null);
+  const completedIntakes = intakes.filter((intake) => intake.status === 'COMPLETED').length;
+  const cancelledIntakes = intakes.filter((intake) => intake.status === 'CANCELLED').length;
+  const activeIntakes = intakes.filter((intake) => ['PENDING', 'PROCESSING'].includes(intake.status)).length;
+  const readyDrafts = drafts.filter((draft) => draft.status === 'READY').length;
+  const officialWorkflowDone = active.length;
+  const completedWorkflowRecords = Math.max(completedIntakes, officialWorkflowDone);
+  const finalizedWorkflowRecords = Math.max(drafts.filter((draft) => draft.status === 'FINALIZED').length, officialWorkflowDone);
+  const workflowDenom = Math.max(intakes.length, officialWorkflowDone, 1);
+  const workflowRadar = [
+    { stage: 'Queued', value: Math.max(intakes.length, officialWorkflowDone) },
+    { stage: 'Active', value: activeIntakes },
+    { stage: 'Completed', value: completedWorkflowRecords },
+    { stage: 'Ready', value: readyDrafts },
+    { stage: 'Finalized', value: finalizedWorkflowRecords },
+    { stage: 'Cancelled', value: cancelledIntakes },
+  ];
 
   const remarks = useMemo(() => remarksCounts(filteredReportEntries, true), [filteredReportEntries]);
+  const remarksSeries = useMemo(() => buildRemarksSeries(filteredReportEntries), [filteredReportEntries]);
   const remarksBars = useMemo(() => {
     const t = remarks.total || 1;
     return [
@@ -242,7 +423,7 @@ export default function Analytics() {
         remark: reportCategory === 'remarks' ? reportSelection : null,
       });
       setReportDialogOpen(false);
-      setReportMsg(`${REPORT_CATEGORY_LABELS[reportCategory] || 'Report'} downloaded. Logged under Activity logs.`);
+      setReportMsg(`${REPORT_CATEGORY_LABELS[reportCategory] || 'Report'} generated. Logged under Activity logs.`);
     } catch (e) {
       const detail = e.response?.data?.detail || e.message || 'Could not generate report.';
       setReportErr(typeof detail === 'string' ? detail : JSON.stringify(detail));
@@ -317,27 +498,35 @@ export default function Analytics() {
                 <div className="flex h-full items-center justify-center text-sm text-slate-500">Loading…</div>
               ) : revenuePeriod === 'monthly' ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={monthlySeries}>
+                  <AreaChart data={monthlySeries}>
+                    <defs>
+                      <linearGradient id="monthlyRevenueArea" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="5%" stopColor="#991b1b" stopOpacity={0.42} />
+                        <stop offset="95%" stopColor="#991b1b" stopOpacity={0.03} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" vertical={false} />
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#94a3b8" />
                     <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" tickFormatter={(v) => `${v}`} />
                     <Tooltip formatter={(v) => formatPhp(v)} contentStyle={CHART_TOOLTIP_STYLE} />
-                    <Bar dataKey="total" radius={[6, 6, 0, 0]}>
-                      {monthlySeries.map((_, i) => (
-                        <Cell key={i} fill={i === monthlySeries.length - 1 ? '#991b1b' : '#fecaca'} />
-                      ))}
-                    </Bar>
-                  </BarChart>
+                    <Area type="monotone" dataKey="total" stroke="#991b1b" fill="url(#monthlyRevenueArea)" strokeWidth={2.5} />
+                  </AreaChart>
                 </ResponsiveContainer>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={quarterlySeries}>
+                  <AreaChart data={quarterlySeries}>
+                    <defs>
+                      <linearGradient id="quarterlyRevenueArea" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="5%" stopColor="#b91c1c" stopOpacity={0.42} />
+                        <stop offset="95%" stopColor="#b91c1c" stopOpacity={0.03} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" vertical={false} />
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#94a3b8" />
                     <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" />
                     <Tooltip formatter={(v) => formatPhp(v)} contentStyle={CHART_TOOLTIP_STYLE} />
-                    <Bar dataKey="total" fill="#b91c1c" radius={[6, 6, 0, 0]} />
-                  </BarChart>
+                    <Area type="monotone" dataKey="total" stroke="#b91c1c" fill="url(#quarterlyRevenueArea)" strokeWidth={2.5} />
+                  </AreaChart>
                 </ResponsiveContainer>
               )}
             </div>
@@ -353,6 +542,107 @@ export default function Analytics() {
             </div>
           </CardFooter>
         </Card>
+
+        <InsightCard
+          title="Notarial activity trend"
+          description="Entry volume and fee movement over the last six months."
+          metrics={[
+            { label: 'Active entries', value: active.length.toLocaleString(), hint: 'Current register records' },
+            { label: 'Archive rate', value: formatPct((archived.length / total) * 100), hint: `${archived.length.toLocaleString()} archived entries` },
+          ]}
+        >
+          {loading ? (
+            <div className="flex h-full items-center justify-center text-sm text-slate-500">Loading…</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={activitySeries}>
+                <defs>
+                  <linearGradient id="entryArea" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="5%" stopColor="#b91c1c" stopOpacity={0.38} />
+                    <stop offset="95%" stopColor="#b91c1c" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                <Tooltip formatter={(v, name) => [name === 'revenue' ? formatPhp(v) : `${v} entries`, name === 'revenue' ? 'Revenue' : 'Entries']} contentStyle={CHART_TOOLTIP_STYLE} />
+                <Area type="monotone" dataKey="entries" stroke="#b91c1c" fill="url(#entryArea)" strokeWidth={2} />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </InsightCard>
+
+        <InsightCard
+          title="Register capacity"
+          description="Book utilization based on active entries per register book."
+          metrics={[
+            { label: 'Avg utilization', value: formatPct(avgBookUtilization), hint: `${books.length.toLocaleString()} active books` },
+            { label: 'Busiest book', value: busiestBook?.book || '—', hint: busiestBook ? `${busiestBook.used}/525 entries` : 'No book data yet' },
+          ]}
+        >
+          {loading ? (
+            <div className="flex h-full items-center justify-center text-sm text-slate-500">Loading…</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={bookUtilization}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" vertical={false} />
+                <XAxis dataKey="book" tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                <Tooltip formatter={(v, name) => [name === 'utilization' ? `${v}%` : v, name === 'utilization' ? 'Utilization' : name]} contentStyle={CHART_TOOLTIP_STYLE} />
+                <Line type="monotone" dataKey="utilization" stroke="#dc2626" strokeWidth={2.5} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </InsightCard>
+
+        <InsightCard
+          title="Workflow conversion"
+          description="Queue health from intake through finalization."
+          metrics={[
+            { label: 'Completion rate', value: formatPct((completedWorkflowRecords / workflowDenom) * 100), hint: `${officialWorkflowDone.toLocaleString()} official entries counted as done` },
+            { label: 'Finalized records', value: finalizedWorkflowRecords.toLocaleString(), hint: `${readyDrafts.toLocaleString()} ready drafts still pending` },
+          ]}
+        >
+          {loading ? (
+            <div className="flex h-full items-center justify-center text-sm text-slate-500">Loading…</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <RadarChart data={workflowRadar}>
+                <PolarGrid className="stroke-slate-200 dark:stroke-slate-700" />
+                <PolarAngleAxis dataKey="stage" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                <PolarRadiusAxis tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                <Radar dataKey="value" stroke="#b91c1c" fill="#b91c1c" fillOpacity={0.24} />
+                <Tooltip formatter={(v) => [`${v} records`, 'Count']} contentStyle={CHART_TOOLTIP_STYLE} />
+              </RadarChart>
+            </ResponsiveContainer>
+          )}
+        </InsightCard>
+
+        <InsightCard
+          title="Workflow throughput"
+          description="Monthly intake, completed queue, ready draft, and finalized movement."
+          metrics={[
+            { label: 'Active queue', value: activeIntakes.toLocaleString(), hint: 'Pending or processing' },
+            { label: 'Cancellation rate', value: formatPct((cancelledIntakes / workflowDenom) * 100), hint: `${cancelledIntakes.toLocaleString()} cancelled intakes` },
+          ]}
+        >
+          {loading ? (
+            <div className="flex h-full items-center justify-center text-sm text-slate-500">Loading…</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={activitySeries}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                <Tooltip formatter={(v) => [`${v} records`, 'Count']} contentStyle={CHART_TOOLTIP_STYLE} />
+                <Line type="monotone" dataKey="intakes" name="Intakes" stroke="#b91c1c" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="completed" name="Completed" stroke="#0f766e" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="ready" name="Ready drafts" stroke="#ca8a04" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="finalized" name="Finalized" stroke="#2563eb" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </InsightCard>
 
         <Card className="xl:col-span-2">
           <CardHeader className="grid gap-4 md:grid-cols-[1fr_minmax(240px,320px)] md:items-end">
@@ -376,15 +666,38 @@ export default function Analytics() {
             <CardDescription>Mix of active versus archived entries.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {volumeBars.map((row) => (
-              <div key={row.label} className="space-y-1.5">
-                <div className="flex justify-between text-xs font-medium text-slate-600 dark:text-slate-300">
-                  <span>{row.label}</span>
-                  <span>{row.pct}%</span>
+            <div className="h-[220px] w-full">
+              {loading ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-500">Loading…</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadialBarChart
+                    data={volumeRadialData}
+                    innerRadius="36%"
+                    outerRadius="92%"
+                    startAngle={90}
+                    endAngle={-270}
+                  >
+                    <PolarAngleAxis type="number" domain={[0, total]} tick={false} />
+                    <RadialBar dataKey="value" background cornerRadius={10} minAngle={8} />
+                    <Tooltip formatter={(v) => [`${v} entries`, 'Count']} contentStyle={CHART_TOOLTIP_STYLE} />
+                  </RadialBarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {volumeBars.map((row) => (
+                <div key={row.label} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="flex items-center gap-2 font-medium text-slate-700 dark:text-slate-200">
+                      <span className={cn('h-2.5 w-2.5 rounded-full', row.tone)} />
+                      {row.label}
+                    </span>
+                    <span className="font-semibold text-slate-900 dark:text-white">{row.pct}%</span>
+                  </div>
                 </div>
-                <Progress value={row.pct} indicatorClassName={row.tone} />
-              </div>
-            ))}
+              ))}
+            </div>
           </CardContent>
         </Card>
 
@@ -455,16 +768,36 @@ export default function Analytics() {
               Generate report
             </Button>
           </CardHeader>
-          <CardContent className="grid gap-6 md:grid-cols-2">
-            {remarksBars.map((row) => (
-              <div key={row.label} className="space-y-1.5">
-                <div className="flex justify-between text-xs font-medium text-slate-600 dark:text-slate-300">
-                  <span>{row.label}</span>
-                  <span>{row.pct}%</span>
+          <CardContent className="space-y-4">
+            <div className="h-[260px] w-full">
+              {loading ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-500">Loading…</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={remarksSeries}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                    <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" allowDecimals={false} />
+                    <Tooltip formatter={(v, name) => [`${v} entries`, name === 'cr' ? 'Copy retained' : 'No copy retained']} contentStyle={CHART_TOOLTIP_STYLE} />
+                    <Line type="monotone" dataKey="cr" name="Copy retained" stroke="#b91c1c" strokeWidth={2.5} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="ncr" name="No copy retained" stroke="#64748b" strokeWidth={2.5} dot={{ r: 3 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {remarksBars.map((row) => (
+                <div key={row.label} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <span className="flex items-center gap-2 font-medium text-slate-700 dark:text-slate-200">
+                      <span className={cn('h-2.5 w-2.5 rounded-full', row.tone)} />
+                      {row.label}
+                    </span>
+                    <span className="font-semibold text-slate-900 dark:text-white">{row.pct}%</span>
+                  </div>
                 </div>
-                <Progress value={row.pct} indicatorClassName={row.tone} />
-              </div>
-            ))}
+              ))}
+            </div>
           </CardContent>
         </Card>
       </div>

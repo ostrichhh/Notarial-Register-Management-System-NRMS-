@@ -38,6 +38,18 @@ body {
   border: 2px solid #f1f5f9;
 }
 
+.nrms-password-input::-ms-reveal,
+.nrms-password-input::-ms-clear {
+  display: none;
+}
+
+.nrms-password-input::-webkit-credentials-auto-fill-button,
+.nrms-password-input::-webkit-caps-lock-indicator {
+  visibility: hidden;
+  display: none !important;
+  pointer-events: none;
+}
+
 .dark * {
   scrollbar-color: #475569 #0f172a;
 }

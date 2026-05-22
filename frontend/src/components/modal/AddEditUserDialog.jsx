@@ -10,6 +10,7 @@ import {
 import { Label } from '../ui/shadcn/Label';
 import { Input } from '../ui/shadcn/Input';
 import { Button } from '../ui/shadcn/Button';
+import PasswordInput from '../ui/PasswordInput';
 import {
   Select,
   SelectContent,
@@ -17,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../ui/shadcn/Select';
+import { summarizeApiError } from '../../lib/friendlyErrors';
 
 const ROLE_OPTIONS = [
   { value: 'ATTORNEY', label: 'Attorney (Primary Notary)' },
@@ -91,7 +93,7 @@ export default function AddEditUserDialog({ open, onOpenChange, user, onSave }) 
       if (data) {
         const apiErrors = {};
         Object.keys(data).forEach((k) => {
-          apiErrors[k] = Array.isArray(data[k]) ? data[k][0] : data[k];
+          apiErrors[k] = summarizeApiError({ [k]: data[k] });
         });
         setErrors(apiErrors);
       }
@@ -187,9 +189,8 @@ export default function AddEditUserDialog({ open, onOpenChange, user, onSave }) 
           {!isEditing && (
             <div className="space-y-1.5">
               <Label htmlFor="password">Password</Label>
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
                 placeholder="Minimum 8 characters"
                 value={form.password}
                 onChange={(e) => handleChange('password', e.target.value)}

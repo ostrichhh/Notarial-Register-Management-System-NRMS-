@@ -115,13 +115,13 @@ export default function Archive() {
         setEntrySuccess('Entry restored successfully.');
       } else if (type === 'entry' && action === 'delete') {
         await AxiosInstance.delete(`/entries/${id}/?archived=true`);
-        setEntrySuccess('Entry permanently deleted.');
+        setEntrySuccess('Entry marked deleted. Its archived slot is preserved.');
       } else if (type === 'book' && action === 'restore') {
         await AxiosInstance.post(`/books/${id}/restore/`);
         setBookSuccess('Book and all its entries restored successfully.');
       } else {
         await AxiosInstance.delete(`/books/${id}/?archived=true`);
-        setBookSuccess('Book permanently deleted.');
+        setBookSuccess('Book marked deleted. Its archived book number and entry slots are preserved.');
       }
 
       if (type === 'entry') {
@@ -155,6 +155,7 @@ export default function Archive() {
     return entries.filter(
       (e) =>
         (e.title || '').toLowerCase().includes(term) ||
+        (e.is_deleted ? 'deleted archived slot' : '').includes(term) ||
         String(e.entry_number).includes(term) ||
         (e.book_number || '').toLowerCase().includes(term),
     );
@@ -175,7 +176,7 @@ export default function Archive() {
       <PageHeader
         eyebrow="Dashboard / Archive"
         title="Archive"
-        subtitle="View and restore archived notarial entries and register books."
+        subtitle="View archived notarial entries and register books."
       />
 
       {/* Tab bar */}
@@ -229,7 +230,7 @@ export default function Archive() {
           {/* Desktop table */}
           <Card className="hidden md:block">
             <CardContent className="overflow-x-auto p-1">
-              <Table>
+              <Table className="min-w-[960px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Book</TableHead>
@@ -269,36 +270,39 @@ export default function Archive() {
                         <TableCell>{entry.book_number || entry.book}</TableCell>
                         <TableCell>{entry.page?.page_number ?? '—'}</TableCell>
                         <TableCell>{entry.entry_number}</TableCell>
-                        <TableCell className="min-w-48 font-medium text-slate-900 dark:text-white">
-                          {entry.title || '—'}
+                        <TableCell className="font-medium text-slate-900 dark:text-white">
+                          {entry.is_deleted ? 'Deleted archived slot' : entry.title || '—'}
                         </TableCell>
-                        <TableCell className="min-w-56 max-w-56 whitespace-normal break-words text-sm">
-                          {formatPeople(entry.parties)}
+                        <TableCell className="text-sm">
+                          {entry.is_deleted ? 'Slot preserved' : formatPeople(entry.parties)}
                         </TableCell>
-                        <TableCell className="min-w-48 max-w-48 whitespace-normal break-words text-sm">
-                          {formatPeople(entry.witnesses)}
+                        <TableCell className="text-sm">
+                          {entry.is_deleted ? '—' : formatPeople(entry.witnesses)}
                         </TableCell>
-                        <TableCell className="min-w-40 text-sm">
+                        <TableCell className="text-sm">
                           {new Date(entry.date_time).toLocaleString()}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline">
-                            {notarialTypeLabel[entry.notarial_type] || entry.notarial_type}
+                            {entry.is_deleted ? 'Deleted' : notarialTypeLabel[entry.notarial_type] || entry.notarial_type}
                           </Badge>
                         </TableCell>
-                        <TableCell>₱ {Number(entry.fees).toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
-                        <TableCell>{entry.or_number}</TableCell>
+                        <TableCell>{entry.is_deleted ? '—' : `₱ ${Number(entry.fees).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}</TableCell>
+                        <TableCell>{entry.is_deleted ? '—' : entry.or_number}</TableCell>
                         <TableCell>
                           <Badge variant={entry.remarks === 'CR' ? 'success' : 'default'}>
-                            {remarksLabel[entry.remarks] || entry.remarks}
+                            {entry.is_deleted ? 'Slot preserved' : remarksLabel[entry.remarks] || entry.remarks}
                           </Badge>
                         </TableCell>
-                        <TableCell className="min-w-36 text-xs text-slate-500 dark:text-slate-400">
+                        <TableCell className="text-xs text-slate-500 dark:text-slate-400">
                           {entry.archived_at
                             ? new Date(entry.archived_at).toLocaleString()
                             : '—'}
                         </TableCell>
                         <TableCell>
+                          {entry.is_deleted ? (
+                            <Badge variant="outline">Deleted slot</Badge>
+                          ) : (
                           <div className="flex items-center gap-2">
                             <BrandIconButton
                               title="Restore entry"
@@ -328,6 +332,7 @@ export default function Archive() {
                               <Trash2 className="h-4 w-4" />
                             </BrandIconButton>
                           </div>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))
@@ -356,10 +361,12 @@ export default function Archive() {
                         <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
                           Entry #{entry.entry_number}
                         </p>
-                        <p className="text-sm font-semibold text-slate-900 dark:text-white">{entry.title || '—'}</p>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                          {entry.is_deleted ? 'Deleted archived slot' : entry.title || '—'}
+                        </p>
                       </div>
                       <Badge variant={entry.remarks === 'CR' ? 'success' : 'default'}>
-                        {remarksLabel[entry.remarks] || entry.remarks}
+                        {entry.is_deleted ? 'Deleted slot' : remarksLabel[entry.remarks] || entry.remarks}
                       </Badge>
                     </div>
                     <div className="grid grid-cols-2 gap-1 text-xs text-slate-600 dark:text-slate-400">
@@ -373,24 +380,27 @@ export default function Archive() {
                       </p>
                       <p>
                         <span className="font-medium text-slate-700 dark:text-slate-300">Type:</span>{' '}
-                        {notarialTypeLabel[entry.notarial_type] || entry.notarial_type}
+                        {entry.is_deleted ? 'Deleted' : notarialTypeLabel[entry.notarial_type] || entry.notarial_type}
                       </p>
                       <p>
                         <span className="font-medium text-slate-700 dark:text-slate-300">Fees:</span> ₱{' '}
-                        {Number(entry.fees).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        {entry.is_deleted ? '—' : Number(entry.fees).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </p>
                     </div>
                     <p className="text-xs text-slate-600 dark:text-slate-400">
-                      <span className="font-medium text-slate-700 dark:text-slate-300">Parties:</span> {formatPeople(entry.parties)}
+                      <span className="font-medium text-slate-700 dark:text-slate-300">Parties:</span> {entry.is_deleted ? 'Slot preserved' : formatPeople(entry.parties)}
                     </p>
                     <p className="text-xs text-slate-600 dark:text-slate-400">
                       <span className="font-medium text-slate-700 dark:text-slate-300">Witnesses:</span>{' '}
-                      {formatPeople(entry.witnesses)}
+                      {entry.is_deleted ? '—' : formatPeople(entry.witnesses)}
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       Archived: {entry.archived_at ? new Date(entry.archived_at).toLocaleString() : '—'}
                     </p>
                     <div className="flex justify-end pt-1">
+                      {entry.is_deleted ? (
+                        <Badge variant="outline">Deleted slot preserved</Badge>
+                      ) : (
                       <div className="flex gap-2">
                         <AppButton
                           variant="outline"
@@ -421,6 +431,7 @@ export default function Archive() {
                           Delete
                         </AppButton>
                       </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -494,6 +505,7 @@ export default function Archive() {
                       >
                         <TableCell className="font-medium text-slate-900 dark:text-white">
                           {book.book_number}
+                          {book.is_deleted ? <span className="ml-2"><Badge variant="outline">Deleted slot</Badge></span> : null}
                         </TableCell>
                         <TableCell>{book.total_pages}</TableCell>
                         <TableCell className="text-sm text-slate-600 dark:text-slate-300">
@@ -503,6 +515,9 @@ export default function Archive() {
                           {book.archived_at ? new Date(book.archived_at).toLocaleString() : '—'}
                         </TableCell>
                         <TableCell>
+                          {book.is_deleted ? (
+                            <Badge variant="outline">Book number preserved</Badge>
+                          ) : (
                           <div className="flex items-center gap-2">
                             <BrandIconButton
                               title="Restore book and all its entries"
@@ -532,6 +547,7 @@ export default function Archive() {
                               <Trash2 className="h-4 w-4" />
                             </BrandIconButton>
                           </div>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))
@@ -558,7 +574,9 @@ export default function Archive() {
                     <div className="flex items-start justify-between gap-2">
                       <div>
                     <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Register Book</p>
-                        <p className="text-sm font-semibold text-slate-900 dark:text-white">{book.book_number}</p>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                          {book.book_number} {book.is_deleted ? '(Deleted slot)' : ''}
+                        </p>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-1 text-xs text-slate-600 dark:text-slate-400">
@@ -568,10 +586,15 @@ export default function Archive() {
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       Archived: {book.archived_at ? new Date(book.archived_at).toLocaleString() : '—'}
                     </p>
-                    <p className="text-xs text-amber-600">
-                      ⚠ Restoring this book will also restore all its entries.
-                    </p>
+                    {!book.is_deleted ? (
+                      <p className="text-xs text-amber-600">
+                        Restoring this book will also restore all its entries.
+                      </p>
+                    ) : null}
                     <div className="flex justify-end pt-1">
+                      {book.is_deleted ? (
+                        <Badge variant="outline">Book number preserved</Badge>
+                      ) : (
                       <div className="flex gap-2">
                         <AppButton
                           variant="outline"
@@ -592,6 +615,7 @@ export default function Archive() {
                           Delete
                         </AppButton>
                       </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -608,14 +632,14 @@ export default function Archive() {
         description={
           actionConfirm.action === 'delete'
             ? actionConfirm.type === 'book'
-              ? `"${actionConfirm.label}" and all its entries will be permanently deleted. This action cannot be undone.`
-              : `"${actionConfirm.label}" will be permanently deleted. This action cannot be undone.`
+              ? `"${actionConfirm.label}" and all its entries will be marked deleted, but the archived book number and slots will stay visible.`
+              : `"${actionConfirm.label}" will be marked deleted, but its archived slot will stay visible.`
             : actionConfirm.type === 'book'
               ? `"${actionConfirm.label}" and all its entries will be moved back to active records.`
               : `"${actionConfirm.label}" will be moved back to active records.`
         }
         variant={actionConfirm.action === 'delete' ? 'danger' : 'info'}
-        confirmLabel={actionConfirm.action === 'delete' ? 'Delete permanently' : 'Restore'}
+        confirmLabel={actionConfirm.action === 'delete' ? 'Mark deleted' : 'Restore'}
         loading={isActioning}
         onConfirm={handleConfirmAction}
         onCancel={closeActionConfirm}

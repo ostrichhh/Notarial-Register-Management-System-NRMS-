@@ -37,6 +37,7 @@ import {
 } from '../lib/dashboardStats';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
+import { consumeFlashMessage } from '../lib/flashMessages';
 
 function formatPhp(n) {
   const v = Number(n);
@@ -78,6 +79,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [forbiddenNote, setForbiddenNote] = useState('');
+  const [loginNote, setLoginNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState('');
   const [books, setBooks] = useState([]);
@@ -85,14 +87,21 @@ export default function Dashboard() {
   const [activeUsers, setActiveUsers] = useState(null);
 
   useEffect(() => {
-    const msg = location.state?.forbiddenMessage;
-    if (!msg) return undefined;
-    setForbiddenNote(msg);
+    const flash = consumeFlashMessage('dashboard');
+    if (flash?.msg) {
+      setLoginNote(flash.msg);
+    }
+
+    const forbiddenMessage = location.state?.forbiddenMessage;
+    const loginMessage = location.state?.loginMessage;
+    if (!forbiddenMessage && !loginMessage && !flash) return undefined;
+    if (forbiddenMessage) setForbiddenNote(forbiddenMessage);
+    if (loginMessage) setLoginNote(loginMessage);
     const raf = window.requestAnimationFrame(() => {
       navigate({ pathname: location.pathname, search: location.search ?? '' }, { replace: true, state: {} });
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [location.state?.forbiddenMessage, navigate, location.pathname, location.search]);
+  }, [location.state?.forbiddenMessage, location.state?.loginMessage, navigate, location.pathname, location.search]);
 
   const loadDashboard = useCallback(async () => {
     setLoadErr('');
@@ -152,7 +161,7 @@ export default function Dashboard() {
         title="Operational overview"
         subtitle="Live metrics from your register books and entries. Volume reflects recorded fees for the last six months."
         actions={
-          <Button type="button" variant="default" size="sm" className="nrms-no-print gap-1.5" onClick={() => navigate('/notarial-entries')}>
+          <Button type="button" variant="default" size="sm" className="nrms-no-print gap-1.5" onClick={() => navigate('/workflow', { state: { startAt: 'auto' } })}>
             <Plus className="h-4 w-4" aria-hidden />
             New entry
           </Button>
@@ -162,6 +171,12 @@ export default function Dashboard() {
       {forbiddenNote ? (
         <Alert variant="warning" dismissible title="Restricted area" onDismiss={() => setForbiddenNote('')}>
           {forbiddenNote}
+        </Alert>
+      ) : null}
+
+      {loginNote ? (
+        <Alert variant="success" dismissible title="Signed in" onDismiss={() => setLoginNote('')}>
+          {loginNote}
         </Alert>
       ) : null}
 

@@ -10,6 +10,7 @@ const ROUTE_DESCRIPTIONS = {
   '/': '',
   '/notarial-register-book': 'Manage Register Books',
   '/notarial-entries': 'Manage Notarial Entries',
+  '/workflow': 'Workflow',
   '/archive': 'Archive',
   '/audit-logs': 'Activity Logs',
   '/manage-user': 'User Management',

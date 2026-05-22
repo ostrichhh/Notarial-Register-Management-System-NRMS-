@@ -10,29 +10,22 @@ import PageSpinner from '../ui/PageSpinner';
 import { API_BASE_URL } from '../../config';
 import { useAuth } from '../../context/AuthContext';
 import VisualPreferencesCard from '../settings/VisualPreferencesCard';
+import { summarizeApiError } from '../../lib/friendlyErrors';
+import { consumeFlashMessage, setFlashMessage } from '../../lib/flashMessages';
 
 function summarizeLoginFailure(err) {
   if (!err.response) {
     const code = err.code;
     if (code === 'ECONNABORTED') {
-      return 'The server took too long to respond. Try again or check whether the Django API is running.';
+      return 'The server took too long to respond. Try again or check whether the service is running.';
     }
     if (err.message === 'Network Error' || code === 'ERR_NETWORK') {
-      return `Cannot reach the API at ${API_BASE_URL.trim()}. Start the Django server (e.g. python manage.py runserver), check the URL matches how you opened this app (localhost vs 127.0.0.1), and set VITE_API_URL if needed.`;
+      return `Cannot reach the service at ${API_BASE_URL.trim()}. Please check that the backend is running and try again.`;
     }
-    return err.message || 'No response from server.';
+    return err.message || 'No response from the service.';
   }
 
-  const d = err.response.data;
-  if (typeof d?.detail === 'string') return d.detail;
-  if (Array.isArray(d?.detail)) return d.detail.join(' ');
-  if (typeof d?.non_field_errors?.[0] === 'string') return d.non_field_errors[0];
-  if (typeof d?.username?.[0] === 'string') return d.username[0];
-  try {
-    return JSON.stringify(d);
-  } catch {
-    return err.message || 'Sign-in rejected.';
-  }
+  return summarizeApiError(err.response.data, 'The username or password is incorrect.');
 }
 
 export default function LoginPage() {
@@ -45,16 +38,23 @@ export default function LoginPage() {
   const [alert, setAlert] = useState(null);
 
   useEffect(() => {
-    const msg = location.state?.postLogoutMessage;
+    const flash = consumeFlashMessage('login');
+    if (flash) {
+      setAlert(flash);
+      navigate({ pathname: location.pathname, search: location.search ?? '' }, { replace: true, state: {} });
+      return undefined;
+    }
+
+    const msg = location.state?.postLogoutMessage || location.state?.firstLoginMessage || location.state?.passwordChangedMessage;
     if (!msg) return undefined;
 
-    setAlert({ variant: 'success', title: 'Signed out', msg });
-
     const raf = window.requestAnimationFrame(() => {
+      const passwordNotice = location.state?.firstLoginMessage || location.state?.passwordChangedMessage;
+      setAlert({ variant: 'success', title: passwordNotice ? 'Password updated' : 'Signed out', msg });
       navigate({ pathname: location.pathname, search: location.search ?? '' }, { replace: true, state: {} });
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [location.state?.postLogoutMessage, navigate, location.pathname, location.search]);
+  }, [location.state?.firstLoginMessage, location.state?.passwordChangedMessage, location.state?.postLogoutMessage, navigate, location.pathname, location.search]);
 
   if (!hydrated) {
     return <PageSpinner />;
@@ -84,7 +84,15 @@ export default function LoginPage() {
       if (forceChange) {
         navigate('/first-login', { replace: true });
       } else {
-        navigate('/', { replace: true });
+        setFlashMessage('dashboard', {
+          variant: 'success',
+          title: 'Signed in',
+          msg: 'You have logged in successfully.',
+        });
+        navigate('/', {
+          replace: true,
+          state: { loginMessage: 'You have logged in successfully.' },
+        });
       }
     } catch (err) {
       const text = summarizeLoginFailure(err);
@@ -101,7 +109,7 @@ export default function LoginPage() {
   return (
     <AuthCenteredShell>
       <AuthFormCard
-        eyebrow="NRMS Gateway"
+        eyebrow="Notarial Register Management System"
         heading="Login"
         centerHeading
         description="Authorized legal personnel only."
@@ -119,13 +127,16 @@ export default function LoginPage() {
           ) : null
         }
       >
-        <form className="space-y-6" onSubmit={handleSubmit} noValidate>
+        <form className="space-y-6" onSubmit={handleSubmit} autoComplete="off" noValidate>
           <AuthField
             id="login-username"
             label="Username"
+            name="nrms-login-user"
+            autoComplete="off"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             autoCapitalize="none"
+            autoCorrect="off"
             spellCheck={false}
             disabled={loading}
           />

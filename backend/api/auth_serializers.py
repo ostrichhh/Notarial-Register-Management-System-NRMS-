@@ -13,6 +13,16 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     username_field = User.USERNAME_FIELD
 
     def validate(self, attrs):
+        username = attrs.get(self.username_field)
+        password = attrs.get('password')
+        if username and password:
+            try:
+                inactive_user = User.objects.get(**{self.username_field: username})
+            except User.DoesNotExist:
+                inactive_user = None
+            if inactive_user and not inactive_user.is_active and inactive_user.check_password(password):
+                raise serializers.ValidationError({'detail': 'Account is deactivated.'})
+
         data = super().validate(attrs)
         user = self.user
         if not user.is_active:

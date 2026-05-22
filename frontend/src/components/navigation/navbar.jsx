@@ -8,6 +8,7 @@ import { useAuth } from '../../context/AuthContext';
 import { cn } from '../../lib/utils';
 import { OCASION_LOGO_DARK_SRC, OCASION_LOGO_LIGHT_SRC } from '../../constants/branding';
 import { filterNavItemsByRole } from '../../lib/navigationConfig';
+import { setFlashMessage } from '../../lib/flashMessages';
 
 export default function Navbar({ collapsed, mobileOpen, onNavigate }) {
   const navigate = useNavigate();
@@ -25,6 +26,11 @@ export default function Navbar({ collapsed, mobileOpen, onNavigate }) {
     setLoggingOut(true);
     try {
       await logout();
+      setFlashMessage('login', {
+        variant: 'success',
+        title: 'Signed out',
+        msg: 'You have signed out successfully.',
+      });
       navigate('/login', {
         replace: true,
         state: { postLogoutMessage: 'You have signed out successfully.' },

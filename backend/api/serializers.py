@@ -111,8 +111,18 @@ class BookSerializer(serializers.ModelSerializer):
             'created_at',
             'is_archived',
             'archived_at',
+            'is_deleted',
+            'deleted_at',
         ]
-        read_only_fields = ['id', 'created_at', 'is_archived', 'archived_at']
+        read_only_fields = ['id', 'created_at', 'is_archived', 'archived_at', 'is_deleted', 'deleted_at']
+
+    def validate_book_number(self, value):
+        qs = Book.objects.filter(book_number=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError('This book number is already reserved by an active or archived book.')
+        return value
 
 
 
@@ -152,6 +162,8 @@ class EntrySerializer(serializers.ModelSerializer):
             'witnesses',
             'is_archived',
             'archived_at',
+            'is_deleted',
+            'deleted_at',
         ]
         read_only_fields = ['page', 'user']
 
@@ -188,14 +200,22 @@ class EntrySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Entry number must be between 1 and 525.")
 
         if book and entry_number is not None:
-            qs = Entry.objects.filter(book=book, entry_number=entry_number, is_archived=False)
+            qs = Entry.objects.filter(book=book, entry_number=entry_number)
             if self.instance:
                 qs = qs.exclude(pk=self.instance.pk)
             if qs.exists():
-                raise serializers.ValidationError("Entry number already exists in this book.")
+                reusable_deleted_slot = (
+                    self.instance
+                    and self.instance.is_archived
+                    and self.instance.is_deleted
+                    and self.context.get('view')
+                    and getattr(self.context.get('view'), 'action', None) == 'replace_deleted'
+                )
+                if not reusable_deleted_slot:
+                    raise serializers.ValidationError("This entry number is already reserved in this book.")
 
         if book and not self.instance:
-            if Entry.objects.filter(book=book, is_archived=False).count() >= 525:
+            if Entry.objects.filter(book=book).count() >= 525:
                 raise serializers.ValidationError("This book already has 525 entries.")
 
         return data
@@ -296,7 +316,140 @@ class EntryLiteSerializer(serializers.ModelSerializer):
             'fees',
             'remarks',
             'is_archived',
+            'is_deleted',
         ]
+
+
+class ClientIntakePartySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ClientIntakeParty
+        fields = ['id', 'name', 'address', 'id_type', 'id_number']
+        read_only_fields = ['id']
+
+
+class ClientIntakeSerializer(serializers.ModelSerializer):
+    parties = ClientIntakePartySerializer(many=True)
+
+    class Meta:
+        model = ClientIntake
+        fields = [
+            'id',
+            'queue_number',
+            'client_name',
+            'address',
+            'parties',
+            'scheduled_date',
+            'status',
+            'cancel_reason',
+            'cancelled_at',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'queue_number', 'client_name', 'address', 'cancelled_at', 'created_at', 'updated_at']
+
+    def validate_parties(self, value):
+        if not value:
+            raise serializers.ValidationError('Add at least one client or party.')
+        for index, party in enumerate(value, start=1):
+            if not party.get('id_type') or not party.get('id_number'):
+                raise serializers.ValidationError(f'Client {index} must have exactly one ID type and ID number.')
+        return value
+
+    def create(self, validated_data):
+        parties_data = validated_data.pop('parties')
+        first_party = parties_data[0]
+        intake = ClientIntake.objects.create(
+            client_name=first_party.get('name', ''),
+            address=first_party.get('address', ''),
+            **validated_data,
+        )
+        for party_data in parties_data:
+            ClientIntakeParty.objects.create(intake=intake, **party_data)
+        return intake
+
+    def update(self, instance, validated_data):
+        parties_data = validated_data.pop('parties', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        if parties_data is not None:
+            first_party = parties_data[0] if parties_data else {}
+            instance.client_name = first_party.get('name', instance.client_name)
+            instance.address = first_party.get('address', instance.address)
+        instance.save()
+        if parties_data is not None:
+            instance.parties.all().delete()
+            for party_data in parties_data:
+                ClientIntakeParty.objects.create(intake=instance, **party_data)
+        return instance
+
+
+class WorkflowDraftSerializer(serializers.ModelSerializer):
+    intake_detail = ClientIntakeSerializer(source='intake', read_only=True)
+    finalized_entry_number = serializers.IntegerField(source='finalized_entry.entry_number', read_only=True)
+    finalized_book_number = serializers.CharField(source='finalized_entry.book.book_number', read_only=True)
+    finalized_page_number = serializers.IntegerField(source='finalized_entry.page.page_number', read_only=True)
+
+    class Meta:
+        model = WorkflowDraft
+        fields = [
+            'id',
+            'intake',
+            'intake_detail',
+            'document_title',
+            'notarial_type',
+            'notarization_datetime',
+            'fees',
+            'or_number',
+            'remarks',
+            'witnesses',
+            'status',
+            'finalized_entry',
+            'finalized_entry_number',
+            'finalized_book_number',
+            'finalized_page_number',
+            'created_at',
+            'updated_at',
+            'finalized_at',
+        ]
+        read_only_fields = [
+            'id',
+            'status',
+            'finalized_entry',
+            'finalized_entry_number',
+            'finalized_book_number',
+            'finalized_page_number',
+            'created_at',
+            'updated_at',
+            'finalized_at',
+        ]
+
+    def validate_witnesses(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError('Witnesses must be a list.')
+        return value
+
+    def validate(self, data):
+        draft = self.instance
+        merged = {
+            'document_title': data.get('document_title', getattr(draft, 'document_title', '')),
+            'notarial_type': data.get('notarial_type', getattr(draft, 'notarial_type', '')),
+            'fees': data.get('fees', getattr(draft, 'fees', None)),
+            'notarization_datetime': data.get('notarization_datetime', getattr(draft, 'notarization_datetime', None)),
+            'or_number': data.get('or_number', getattr(draft, 'or_number', '')),
+            'remarks': data.get('remarks', getattr(draft, 'remarks', '')),
+            'witnesses': data.get('witnesses', getattr(draft, 'witnesses', [])),
+        }
+        missing = []
+        for field in ['document_title', 'notarial_type', 'notarization_datetime', 'fees', 'or_number', 'remarks']:
+            if merged[field] in (None, ''):
+                missing.append(field)
+        if not merged['witnesses']:
+            missing.append('witnesses')
+        if missing:
+            raise serializers.ValidationError({
+                'detail': f"Complete all draft fields before saving: {', '.join(missing)}."
+            })
+        return data
 
 
 # AUDIT LOG

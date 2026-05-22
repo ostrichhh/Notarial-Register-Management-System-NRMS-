@@ -189,16 +189,20 @@ function buildPrintableReport(data) {
       width: 100%;
       border-collapse: collapse;
       table-layout: fixed;
-      font-size: 13px;
+      font-size: 12px;
+      line-height: 1.18;
+      word-spacing: normal;
     }
     th,
     td {
       border: 1px solid #000;
-      padding: 4px 10px;
+      padding: 4px 6px;
       text-align: left;
       vertical-align: top;
       min-height: 24px;
-      word-break: break-word;
+      word-break: normal;
+      overflow-wrap: break-word;
+      hyphens: auto;
     }
     th {
       font-weight: 400;
@@ -282,27 +286,81 @@ function buildPrintableReport(data) {
 </html>`;
 }
 
+async function printHtmlSmoothly({ html, filename }) {
+  const previousActiveElement = document.activeElement;
+  let frame = null;
+  let cleanupTimer = null;
+
+  const cleanup = () => {
+    if (cleanupTimer) window.clearTimeout(cleanupTimer);
+    if (frame?.parentNode) frame.parentNode.removeChild(frame);
+    window.setTimeout(() => {
+      if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
+        previousActiveElement.focus({ preventScroll: true });
+      } else {
+        window.focus();
+      }
+    }, 0);
+  };
+
+  try {
+    frame = document.createElement('iframe');
+    frame.title = filename.replace(/\.html$/i, '');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.position = 'fixed';
+    frame.style.right = '0';
+    frame.style.bottom = '0';
+    frame.style.width = '1px';
+    frame.style.height = '1px';
+    frame.style.border = '0';
+    frame.style.opacity = '0';
+    frame.style.pointerEvents = 'none';
+    document.body.appendChild(frame);
+
+    const printDocument = frame.contentDocument || frame.contentWindow?.document;
+    if (!printDocument || !frame.contentWindow) {
+      throw new Error('Report print frame is unavailable.');
+    }
+
+    printDocument.open();
+    printDocument.write(html);
+    printDocument.close();
+
+    await new Promise((resolve) => {
+      const finish = () => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+      if (printDocument.readyState === 'complete') {
+        finish();
+        return;
+      }
+      frame.addEventListener('load', finish, { once: true });
+    });
+
+    if (printDocument.fonts?.ready) {
+      await printDocument.fonts.ready;
+    }
+
+    const reportWindow = frame.contentWindow;
+    reportWindow.addEventListener('afterprint', cleanup, { once: true });
+    cleanupTimer = window.setTimeout(cleanup, 4000);
+    reportWindow.focus();
+    reportWindow.print();
+  } catch {
+    cleanup();
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+}
+
 /** Opens the generated report as a printable list. */
 export async function downloadOfficeReport(options = {}) {
   const { data } = await AxiosInstance.post('/reports/generate/', options);
   const html = buildPrintableReport(data);
-  const reportWindow = window.open('', '_blank');
-
-  if (reportWindow) {
-    reportWindow.document.open();
-    reportWindow.document.write(html);
-    reportWindow.document.close();
-    reportWindow.focus();
-    reportWindow.setTimeout(() => reportWindow.print(), 250);
-    return;
-  }
-
-  const blob = new Blob([html], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
   const reportType = options.report_type || 'report';
-  anchor.href = url;
-  anchor.download = `nrms-${reportType}-list-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.html`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  const filename = `nrms-${reportType}-list-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.html`;
+  await printHtmlSmoothly({ html, filename });
 }

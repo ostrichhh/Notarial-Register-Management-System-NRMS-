@@ -67,6 +67,39 @@ export function AuthProvider({ children }) {
   }, [hydrate]);
 
   useEffect(() => {
+    function syncWithStoredSession(event) {
+      const session = readStoredSession();
+      if (!session?.access || !session?.refresh) {
+        setUserState(null);
+        setTokens(null);
+        setHydrated(true);
+        return;
+      }
+
+      setTokens((current) => {
+        if (current?.access === session.access && current?.refresh === session.refresh) {
+          return current;
+        }
+        return { access: session.access, refresh: session.refresh };
+      });
+
+      if (event?.type === 'pageshow' && event.persisted) {
+        hydrate();
+      }
+    }
+
+    window.addEventListener('pageshow', syncWithStoredSession);
+    window.addEventListener('focus', syncWithStoredSession);
+    document.addEventListener('visibilitychange', syncWithStoredSession);
+
+    return () => {
+      window.removeEventListener('pageshow', syncWithStoredSession);
+      window.removeEventListener('focus', syncWithStoredSession);
+      document.removeEventListener('visibilitychange', syncWithStoredSession);
+    };
+  }, [hydrate]);
+
+  useEffect(() => {
     function onExpired() {
       setUserState(null);
       setTokens(null);
@@ -112,15 +145,9 @@ export function AuthProvider({ children }) {
         new_password: newPassword,
         confirm_password: confirmPassword,
       });
-      const nextUser = data?.user;
-      if (nextUser && typeof nextUser === 'object') {
-        setUserPatch(nextUser);
-      } else {
-        await refreshMe();
-      }
       return data;
     },
-    [refreshMe, setUserPatch]
+    []
   );
 
   const logoutImmediate = useCallback(() => {

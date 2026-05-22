@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Alert from '../ui/Alert';
 import AppButton from '../ui/AppButton';
 import ConfirmSubmitDialog from '../ui/ConfirmSubmitDialog';
@@ -52,6 +52,8 @@ export default function AddEntryModal({
   onSubmit,
   books,
   defaultBookId,
+  defaultEntryNumber,
+  lockedSlot = false,
   submitting,
   errorMessage,
 }) {
@@ -63,6 +65,15 @@ export default function AddEntryModal({
   const [validationError, setValidationError] = useState('');
 
   const bookOptions = useMemo(() => books || [], [books]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setFormData((prev) => ({
+      ...prev,
+      book: defaultBookId || prev.book || '',
+      entry_number: defaultEntryNumber || prev.entry_number || '',
+    }));
+  }, [defaultBookId, defaultEntryNumber, isOpen]);
 
   const selectedBookLabel = useMemo(() => {
     const found = bookOptions.find((b) => String(b.id) === String(formData.book));
@@ -174,7 +185,9 @@ export default function AddEntryModal({
         >
           {/* Header */}
           <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-950">
-            <h2 className="text-lg font-semibold text-slate-900">Add New Notarial Entry</h2>
+            <h2 className="text-lg font-semibold text-slate-900">
+              {lockedSlot ? 'Add Notarial Entry to Deleted Slot' : 'Add New Notarial Entry'}
+            </h2>
             <button
               type="button"
               className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
@@ -194,6 +207,7 @@ export default function AddEntryModal({
                   name="book"
                   value={formData.book}
                   onChange={handleChange}
+                  disabled={lockedSlot}
                   options={[
                     { value: '', label: 'Select a book' },
                     ...bookOptions.map((book) => ({
@@ -215,6 +229,7 @@ export default function AddEntryModal({
                   max="525"
                   value={formData.entry_number}
                   onChange={handleChange}
+                  disabled={lockedSlot}
                   required
                 />
               </label>

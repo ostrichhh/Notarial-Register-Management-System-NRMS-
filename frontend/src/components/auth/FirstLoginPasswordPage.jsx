@@ -4,26 +4,16 @@ import { Navigate, useNavigate } from 'react-router';
 import Alert from '../ui/Alert';
 import AuthField from './AuthField';
 import AuthFormCard from './AuthFormCard';
-import AuthSplitShell from './AuthSplitShell';
+import AuthCenteredShell from './AuthCenteredShell';
 import { Button } from '../ui/shadcn/Button';
 import PageSpinner from '../ui/PageSpinner';
 import { useAuth } from '../../context/AuthContext';
-
-function parseApiErrors(data) {
-  if (!data) return 'Could not validate form.';
-  const fieldKeys = ['current_password', 'new_password', 'confirm_password', 'non_field_errors'];
-  const parts = [];
-  for (const key of fieldKeys) {
-    if (Array.isArray(data[key])) parts.push(`${key}: ${data[key].join(' ')}`);
-    else if (typeof data[key] === 'string') parts.push(`${key}: ${data[key]}`);
-  }
-  if (data.detail && typeof data.detail === 'string') parts.push(data.detail);
-  return parts.filter(Boolean).join(' ') || 'Validation failed.';
-}
+import { summarizeApiError } from '../../lib/friendlyErrors';
+import { setFlashMessage } from '../../lib/flashMessages';
 
 export default function FirstLoginPasswordPage() {
   const navigate = useNavigate();
-  const { hydrated, isAuthenticated, requiresPasswordChange, submitFirstLoginPasswordChange } = useAuth();
+  const { hydrated, isAuthenticated, requiresPasswordChange, submitFirstLoginPasswordChange, logout } = useAuth();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -83,19 +73,25 @@ export default function FirstLoginPasswordPage() {
 
     setLoading(true);
     try {
-      const data = await submitFirstLoginPasswordChange({
+      await submitFirstLoginPasswordChange({
         currentPassword,
         newPassword,
         confirmPassword,
       });
-      setDoneMsg(data?.message || 'Password reset complete. Routing you to NRMS Dashboard.');
-      window.setTimeout(() => {
-        navigate('/', { replace: true });
-      }, 900);
+      await logout();
+      setFlashMessage('login', {
+        variant: 'success',
+        title: 'Password updated',
+        msg: 'Password changed. Please log in with your new password.',
+      });
+      navigate('/login', {
+        replace: true,
+        state: { firstLoginMessage: 'Password changed. Please log in with your new password.' },
+      });
     } catch (err) {
       const msg =
         err.response?.data && typeof err.response.data === 'object'
-          ? parseApiErrors(err.response.data)
+          ? summarizeApiError(err.response.data, 'Could not update your password.')
           : err.message || 'Could not reset password.';
       setAlert({ variant: 'error', title: 'Reset failed', msg });
     } finally {
@@ -126,56 +122,60 @@ export default function FirstLoginPasswordPage() {
   }
 
   return (
-    <AuthSplitShell>
-      <AuthFormCard
-        eyebrow="First Login"
-        heading="Establish your secure password"
-        description="You're required to change your starter password once before proceeding to the suite."
-        banner={bannerAlerts.length ? <div className="flex flex-col gap-3">{bannerAlerts}</div> : null}
-        footer="After confirmation you keep the same MFA posture as mandated by office counsel."
-      >
-        <form className="space-y-5" onSubmit={handleSubmit} noValidate>
-          <AuthField
-            id="first-current-password"
-            label="Current Password"
-            type="password"
-            autoComplete="current-password"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-            disabled={loading || Boolean(doneMsg)}
-          />
-          <AuthField
-            id="first-new-password"
-            label="New Password"
-            hint="Minimum 8 characters recommended by Django validators."
-            type="password"
-            autoComplete="new-password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            disabled={loading || Boolean(doneMsg)}
-          />
-          <AuthField
-            id="first-confirm-password"
-            label="Confirm Password"
-            type="password"
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            disabled={loading || Boolean(doneMsg)}
-          />
+    <AuthCenteredShell>
+      <div className="fixed inset-0 z-0 bg-slate-950/55 backdrop-blur-sm" aria-hidden />
+      <div className="relative z-10 w-full max-w-xl">
+        <AuthFormCard
+          eyebrow="First Login"
+          heading="Change your temporary password"
+          centerHeading
+          description="This one-time step is required before this account can access NRMS."
+          banner={bannerAlerts.length ? <div className="flex flex-col gap-3">{bannerAlerts}</div> : null}
+          footer="After saving, sign in again with your new password."
+        >
+          <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+            <AuthField
+              id="first-current-password"
+              label="Default Password"
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              disabled={loading || Boolean(doneMsg)}
+            />
+            <AuthField
+              id="first-new-password"
+              label="New Password"
+              hint="Use at least 8 characters."
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              disabled={loading || Boolean(doneMsg)}
+            />
+            <AuthField
+              id="first-confirm-password"
+              label="Confirm Password"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              disabled={loading || Boolean(doneMsg)}
+            />
 
-          <Button
-            type="submit"
-            className="h-11 w-full"
-            size="lg"
-            isLoading={loading}
-            loadingLabel="Saving…"
-            disabled={Boolean(doneMsg)}
-          >
-            Verify & Unlock Dashboard Access
-          </Button>
-        </form>
-      </AuthFormCard>
-    </AuthSplitShell>
+            <Button
+              type="submit"
+              className="h-11 w-full"
+              size="lg"
+              isLoading={loading}
+              loadingLabel="Saving…"
+              disabled={Boolean(doneMsg)}
+            >
+              Save Password
+            </Button>
+          </form>
+        </AuthFormCard>
+      </div>
+    </AuthCenteredShell>
   );
 }

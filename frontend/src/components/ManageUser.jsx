@@ -71,6 +71,8 @@ export default function ManageUser() {
   const [editingUser, setEditingUser] = useState(null); // null = add mode
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [toggleConfirm, setToggleConfirm] = useState(null);
+  const [toggleLoading, setToggleLoading] = useState(false);
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
   const fetchUsers = useCallback(async () => {
@@ -135,10 +137,20 @@ export default function ManageUser() {
     await fetchUsers();
   }
 
-  async function handleToggleActive(user) {
-    await AxiosInstance.post(`/users/${user.id}/deactivate/`);
+  function requestToggleActive(user) {
+    setToggleConfirm(user);
+  }
 
-    await fetchUsers();
+  async function handleToggleActive() {
+    if (!toggleConfirm) return;
+    setToggleLoading(true);
+    try {
+      await AxiosInstance.post(`/users/${toggleConfirm.id}/deactivate/`);
+      setToggleConfirm(null);
+      await fetchUsers();
+    } finally {
+      setToggleLoading(false);
+    }
   }
 
   function requestDeleteUser(user) {
@@ -290,7 +302,7 @@ export default function ManageUser() {
                           variant="ghost"
                           size="icon"
                           title={user.is_active ? 'Deactivate user' : 'Reactivate user'}
-                          onClick={() => handleToggleActive(user)}
+                          onClick={() => requestToggleActive(user)}
                         >
                           {user.is_active ? (
                             <UserX className="h-4 w-4 text-red-500" />
@@ -347,6 +359,27 @@ export default function ManageUser() {
         loading={deleteLoading}
         onConfirm={handleDeleteUser}
         onCancel={() => setDeleteConfirm(null)}
+      />
+
+      <AlertDialog
+        isOpen={Boolean(toggleConfirm)}
+        title={toggleConfirm?.is_active ? 'Deactivate account?' : 'Activate account?'}
+        description={
+          toggleConfirm
+            ? toggleConfirm.is_active
+              ? `@${toggleConfirm.username} will no longer be able to log in until the account is activated again.`
+              : `@${toggleConfirm.username} will be able to log in again.`
+            : ''
+        }
+        variant={toggleConfirm?.is_active ? 'warning' : 'info'}
+        confirmLabel={toggleConfirm?.is_active ? 'Deactivate account' : 'Activate account'}
+        confirmLoadingLabel={toggleConfirm?.is_active ? 'Deactivating…' : 'Activating…'}
+        cancelLabel="Cancel"
+        loading={toggleLoading}
+        onConfirm={handleToggleActive}
+        onCancel={() => {
+          if (!toggleLoading) setToggleConfirm(null);
+        }}
       />
     </div>
   );

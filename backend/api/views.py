@@ -1,17 +1,20 @@
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Prefetch
-from rest_framework import permissions, status, viewsets
+from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from .audit_service import record_audit
-from .models import AuditLog, Book, Entry, User
-from .permissions import IsAdminOnly
+from .models import AuditLog, Book, ClientIntake, Entry, Page, User, WorkflowDraft
+from .permissions import IsAdminOnly, IsAdminOrAttorney
 from .serializers import (
     AuditLogSerializer,
     BookSerializer,
+    ClientIntakeSerializer,
     EntryLiteSerializer,
     EntrySerializer,
+    WorkflowDraftSerializer,
     UserCreateUpdateSerializer,
     UserSerializer,
 )
@@ -23,6 +26,55 @@ def _resolve_user(request):
     if user and getattr(user, 'is_authenticated', False):
         return user
     return None
+
+
+def _next_queue_number():
+    year = timezone.now().year
+    prefix = f'Q-{year}-'
+    latest = (
+        ClientIntake.objects.filter(queue_number__startswith=prefix)
+        .order_by('-queue_number')
+        .first()
+    )
+    if not latest:
+        return f'{prefix}001'
+    try:
+        next_number = int(latest.queue_number.rsplit('-', 1)[1]) + 1
+    except (IndexError, ValueError):
+        next_number = ClientIntake.objects.filter(queue_number__startswith=prefix).count() + 1
+    return f'{prefix}{next_number:03d}'
+
+
+def _first_available_assignment():
+    for book in Book.objects.filter(is_archived=False).order_by('book_number', 'id'):
+        used = set(
+            Entry.objects.filter(book=book)
+            .values_list('entry_number', flat=True)
+        )
+        max_entries = int(book.total_pages or 105) * 5
+        for entry_number in range(1, max_entries + 1):
+            if entry_number not in used:
+                page_number = ((entry_number - 1) // 5) + 1
+                page, _ = Page.objects.get_or_create(book=book, page_number=page_number)
+                return book, page, entry_number
+    return None, None, None
+
+
+def _draft_missing_fields(draft):
+    missing = []
+    checks = {
+        'document_title': draft.document_title,
+        'notarial_type': draft.notarial_type,
+        'notarization_datetime': draft.notarization_datetime,
+        'fees': draft.fees,
+        'or_number': draft.or_number,
+        'remarks': draft.remarks,
+        'witnesses': draft.witnesses,
+    }
+    for field, value in checks.items():
+        if value in (None, '', []):
+            missing.append(field)
+    return missing
 
 
 # USER VIEWSET
@@ -129,13 +181,24 @@ class EntryViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         pk = instance.pk
         summary = f'Entry #{instance.entry_number} (book id {instance.book_id})'
-        super().perform_destroy(instance)
+        if instance.is_archived or self.request.query_params.get('archived') == 'true':
+            instance.is_archived = True
+            instance.is_deleted = True
+            instance.deleted_at = timezone.now()
+            instance.deleted_by = _resolve_user(self.request)
+            if instance.archived_at is None:
+                instance.archived_at = instance.deleted_at
+            instance.save(update_fields=['is_archived', 'is_deleted', 'deleted_at', 'deleted_by', 'archived_at'])
+            description = f'Marked archived {summary} as deleted; slot preserved'
+        else:
+            super().perform_destroy(instance)
+            description = f'Deleted {summary}'
         record_audit(
             user=self.request.user,
             action='DELETE',
             model_name='Entry',
             object_id=pk,
-            description=f'Deleted {summary}',
+            description=description,
         )
 
     def get_queryset(self):
@@ -147,13 +210,13 @@ class EntryViewSet(viewsets.ModelViewSet):
             Prefetch('witnesses'),
         )
         if is_lite:
-            base_qs = Entry.objects.only('id', 'book_id', 'date_time', 'notarial_type', 'fees', 'remarks', 'is_archived')
+            base_qs = Entry.objects.only('id', 'book_id', 'date_time', 'notarial_type', 'fees', 'remarks', 'is_archived', 'is_deleted')
         if book_id:
             base_qs = base_qs.filter(book_id=book_id)
         archived = self.request.query_params.get('archived')
         if archived == 'true':
             return base_qs.filter(is_archived=True).order_by('-date_time')
-        return base_qs.filter(is_archived=False).order_by('-date_time')
+        return base_qs.filter(is_archived=False, is_deleted=False).order_by('-date_time')
 
     @action(detail=True, methods=['post'])
     def archive(self, request, pk=None):
@@ -185,7 +248,13 @@ class EntryViewSet(viewsets.ModelViewSet):
             book_id=entry.book_id,
             entry_number=entry.entry_number,
             is_archived=False,
+            is_deleted=False,
         ).exclude(pk=entry.pk).exists()
+        if entry.is_deleted:
+            return Response(
+                {'detail': 'This archived entry was marked deleted and is kept only to preserve its slot.'},
+                status=status.HTTP_409_CONFLICT,
+            )
         if conflict:
             return Response(
                 {
@@ -211,6 +280,48 @@ class EntryViewSet(viewsets.ModelViewSet):
         )
 
         return Response({'message': 'Entry restored'})
+
+    @action(detail=True, methods=['post'], url_path='replace-deleted')
+    def replace_deleted(self, request, pk=None):
+        try:
+            entry = Entry.objects.select_related('book', 'page').get(pk=pk)
+        except Entry.DoesNotExist:
+            return Response({'detail': 'Entry not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not entry.is_archived or not entry.is_deleted:
+            return Response(
+                {'detail': 'Only deleted archived slots can be filled from this action.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        requested_book = request.data.get('book')
+        requested_entry_number = request.data.get('entry_number')
+        if str(requested_book) != str(entry.book_id) or str(requested_entry_number) != str(entry.entry_number):
+            return Response(
+                {'detail': 'This entry must use the same book and entry number as the deleted slot.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(entry, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        entry = serializer.save()
+        entry.is_archived = False
+        entry.archived_at = None
+        entry.archived_by = None
+        entry.is_deleted = False
+        entry.deleted_at = None
+        entry.deleted_by = None
+        entry.save(update_fields=['is_archived', 'archived_at', 'archived_by', 'is_deleted', 'deleted_at', 'deleted_by', 'updated_at'])
+
+        record_audit(
+            user=request.user,
+            action='CREATE',
+            model_name='Entry',
+            object_id=entry.pk,
+            description=f'Filled deleted slot as entry #{entry.entry_number} (book id {entry.book_id})',
+        )
+
+        return Response(self.get_serializer(entry).data, status=status.HTTP_200_OK)
 
 
 # BOOK VIEWSET
@@ -245,20 +356,39 @@ class BookViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         pk = instance.pk
         bn = instance.book_number
-        super().perform_destroy(instance)
+        if instance.is_archived or self.request.query_params.get('archived') == 'true':
+            deleted_at = timezone.now()
+            user = _resolve_user(self.request)
+            instance.is_archived = True
+            instance.is_deleted = True
+            instance.deleted_at = deleted_at
+            instance.deleted_by = user
+            if instance.archived_at is None:
+                instance.archived_at = deleted_at
+            instance.save(update_fields=['is_archived', 'is_deleted', 'deleted_at', 'deleted_by', 'archived_at'])
+            instance.entries.update(
+                is_archived=True,
+                is_deleted=True,
+                deleted_at=deleted_at,
+                deleted_by=user,
+            )
+            description = f'Marked archived book {bn} as deleted; book number and entry slots preserved'
+        else:
+            super().perform_destroy(instance)
+            description = f'Deleted book {bn}'
         record_audit(
             user=self.request.user,
             action='DELETE',
             model_name='Book',
             object_id=pk,
-            description=f'Deleted book {bn}',
+            description=description,
         )
 
     def get_queryset(self):
         archived = self.request.query_params.get('archived')
         if archived == 'true':
             return Book.objects.filter(is_archived=True)
-        return Book.objects.filter(is_archived=False)
+        return Book.objects.filter(is_archived=False, is_deleted=False)
 
     @action(detail=True, methods=['post'])
     def archive(self, request, pk=None):
@@ -298,7 +428,13 @@ class BookViewSet(viewsets.ModelViewSet):
         conflict = Book.objects.filter(
             book_number=book.book_number,
             is_archived=False,
+            is_deleted=False,
         ).exclude(pk=book.pk).exists()
+        if book.is_deleted:
+            return Response(
+                {'detail': 'This archived book was marked deleted and is kept only to preserve its book number.'},
+                status=status.HTTP_409_CONFLICT,
+            )
         if conflict:
             return Response(
                 {
@@ -334,8 +470,188 @@ class BookViewSet(viewsets.ModelViewSet):
         return Response({'message': 'Book and entries restored'})
 
 
+class ClientIntakeViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = ClientIntake.objects.select_related('created_by', 'cancelled_by').prefetch_related('parties').all()
+    serializer_class = ClientIntakeSerializer
+
+    def perform_create(self, serializer):
+        intake = serializer.save(
+            queue_number=_next_queue_number(),
+            created_by=_resolve_user(self.request),
+        )
+        WorkflowDraft.objects.create(
+            intake=intake,
+            created_by=_resolve_user(self.request),
+        )
+        record_audit(
+            user=self.request.user,
+            action='CREATE',
+            model_name='ClientIntake',
+            object_id=intake.pk,
+            description=f'Created client intake {intake.queue_number}',
+        )
+
+    def perform_update(self, serializer):
+        intake = serializer.save()
+        record_audit(
+            user=self.request.user,
+            action='UPDATE',
+            model_name='ClientIntake',
+            object_id=intake.pk,
+            description=f'Updated client details for {intake.queue_number}',
+        )
+
+    @action(detail=True, methods=['post'])
+    def process(self, request, pk=None):
+        intake = self.get_object()
+        if intake.status == ClientIntake.CANCELLED:
+            return Response({'detail': 'Cancelled clients cannot be processed.'}, status=status.HTTP_400_BAD_REQUEST)
+        intake.status = ClientIntake.PROCESSING
+        intake.save(update_fields=['status', 'updated_at'])
+        record_audit(
+            user=request.user,
+            action='UPDATE',
+            model_name='ClientIntake',
+            object_id=intake.pk,
+            description=f'Moved {intake.queue_number} to processing',
+        )
+        return Response(self.get_serializer(intake).data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        intake = self.get_object()
+        reason = request.data.get('reason', '')
+        intake.status = ClientIntake.CANCELLED
+        intake.cancel_reason = reason
+        intake.cancelled_at = timezone.now()
+        intake.cancelled_by = _resolve_user(request)
+        intake.save()
+        WorkflowDraft.objects.filter(intake=intake).update(status=WorkflowDraft.CANCELLED)
+        record_audit(
+            user=request.user,
+            action='UPDATE',
+            model_name='ClientIntake',
+            object_id=intake.pk,
+            description=f'Cancelled {intake.queue_number}; reason={reason or "Not specified"}',
+        )
+        return Response(self.get_serializer(intake).data)
+
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        intake = self.get_object()
+        if intake.status == ClientIntake.CANCELLED:
+            return Response({'detail': 'Cancelled clients cannot be completed.'}, status=status.HTTP_400_BAD_REQUEST)
+        intake.status = ClientIntake.COMPLETED
+        intake.save(update_fields=['status', 'updated_at'])
+        record_audit(
+            user=request.user,
+            action='UPDATE',
+            model_name='ClientIntake',
+            object_id=intake.pk,
+            description=f'Marked {intake.queue_number} complete in queue',
+        )
+        return Response(self.get_serializer(intake).data)
+
+
+class WorkflowDraftViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = WorkflowDraft.objects.select_related(
+        'intake',
+        'finalized_entry',
+        'finalized_entry__book',
+        'finalized_entry__page',
+    ).all()
+    serializer_class = WorkflowDraftSerializer
+
+    def perform_update(self, serializer):
+        if serializer.instance.intake.status != ClientIntake.COMPLETED:
+            raise serializers.ValidationError('Draft entry can only be encoded after the queue item is completed.')
+        draft = serializer.save(status=WorkflowDraft.READY, updated_by=_resolve_user(self.request))
+        record_audit(
+            user=self.request.user,
+            action='UPDATE',
+            model_name='WorkflowDraft',
+            object_id=draft.pk,
+            description=f'Saved complete draft for {draft.intake.queue_number}',
+        )
+
+    @transaction.atomic
+    @action(detail=True, methods=['post'])
+    def finalize(self, request, pk=None):
+        draft = (
+            WorkflowDraft.objects.select_for_update()
+            .select_related('intake')
+            .get(pk=pk)
+        )
+        if draft.status == WorkflowDraft.FINALIZED:
+            return Response({'detail': 'Draft is already finalized.'}, status=status.HTTP_400_BAD_REQUEST)
+        if draft.status == WorkflowDraft.CANCELLED or draft.intake.status == ClientIntake.CANCELLED:
+            return Response({'detail': 'Cancelled clients cannot be finalized.'}, status=status.HTTP_400_BAD_REQUEST)
+        if draft.intake.status != ClientIntake.COMPLETED:
+            return Response({'detail': 'Complete the queue item before finalization.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        missing = _draft_missing_fields(draft)
+        if missing:
+            return Response(
+                {'detail': f"Complete all draft fields before finalization: {', '.join(missing)}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        book, page, entry_number = _first_available_assignment()
+        if not book:
+            return Response({'detail': 'No available active book slot.'}, status=status.HTTP_409_CONFLICT)
+
+        entry = Entry.objects.create(
+            book=book,
+            page=page,
+            user=request.user,
+            entry_number=entry_number,
+            title=draft.document_title,
+            date_time=draft.notarization_datetime,
+            notarial_type=draft.notarial_type,
+            fees=draft.fees,
+            or_number=draft.or_number,
+            remarks=draft.remarks,
+        )
+        for intake_party in draft.intake.parties.all():
+            party = entry.parties.create(
+                name=intake_party.name,
+                address=intake_party.address,
+            )
+            party.identities.create(id_type=intake_party.id_type, id_number=intake_party.id_number)
+        for witness in draft.witnesses or []:
+            if isinstance(witness, dict):
+                name = witness.get('name')
+                address = witness.get('address') or 'On file'
+            else:
+                name = str(witness)
+                address = 'On file'
+            if name:
+                entry.witnesses.create(name=name, address=address)
+
+        draft.status = WorkflowDraft.FINALIZED
+        draft.finalized_entry = entry
+        draft.finalized_by = _resolve_user(request)
+        draft.finalized_at = timezone.now()
+        draft.save()
+
+        draft.intake.status = ClientIntake.COMPLETED
+        draft.intake.save(update_fields=['status', 'updated_at'])
+
+        record_audit(
+            user=request.user,
+            action='CREATE',
+            model_name='Entry',
+            object_id=entry.pk,
+            description=f'Finalized {draft.intake.queue_number} as entry #{entry.entry_number} in book {book.book_number}',
+        )
+
+        return Response(EntrySerializer(entry, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
-    permission_classes = [permissions.IsAuthenticated, IsAdminOnly]
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrAttorney]
     pagination_class = None
     queryset = AuditLog.objects.select_related('user').all().order_by('-timestamp')
     serializer_class = AuditLogSerializer

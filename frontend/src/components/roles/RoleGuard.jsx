@@ -16,7 +16,7 @@ export default function RoleGuard({ allowedRoles, children }) {
         state={{
           from: location.pathname,
           forbiddenMessage:
-            'That area is restricted. Only admins can open User Management or Activity Logs.',
+            'That area is restricted for your current user level.',
         }}
       />
     );

@@ -2,8 +2,8 @@ import React from 'react';
 
 import { cn } from '../../lib/utils';
 
-export function Table({ children }) {
-  return <table className="w-full border-collapse text-sm">{children}</table>;
+export function Table({ children, className = '' }) {
+  return <table className={cn('w-full border-collapse text-sm', className)}>{children}</table>;
 }
 
 export function TableHeader({ children }) {

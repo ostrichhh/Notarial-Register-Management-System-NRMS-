@@ -1,11 +1,12 @@
 const STORAGE_KEY = 'nrms_auth_session';
 
 /**
- * Persisted JWT + user snapshot (user is refreshed via /auth/me/ on hydrate).
+ * Per-tab JWT + user snapshot (user is refreshed via /auth/me/ on hydrate).
  */
 export function readStoredSession() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) localStorage.removeItem(STORAGE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
     if (!data?.access || !data?.refresh) return null;
@@ -24,7 +25,7 @@ export function writeStoredSession(session) {
     refresh: session.refresh,
     ...(session.user !== undefined ? { user: session.user } : {}),
   };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
 }
 
 export function patchStoredAccess(access) {
@@ -34,6 +35,7 @@ export function patchStoredAccess(access) {
 }
 
 export function clearStoredSession() {
+  sessionStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(STORAGE_KEY);
 }
 

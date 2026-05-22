@@ -14,6 +14,7 @@ import NotarialEntries from './NotarialEntries';
 import NotarialRegisterBooks from './NotarialRegisterBooks';
 import RoleGuard from './roles/RoleGuard';
 import Settings from './Settings';
+import WorkflowPage from './workflow/WorkflowPage';
 
 /**
  * Routing after auth hydrate (see AuthProvider): public auth pages + protected NRMS workspace.
@@ -29,6 +30,7 @@ export default function AppRoutes() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/notarial-register-book" element={<NotarialRegisterBooks />} />
           <Route path="/notarial-entries" element={<NotarialEntries />} />
+          <Route path="/workflow" element={<WorkflowPage />} />
           <Route path="/archive" element={<Archive />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/settings" element={<Settings />} />
@@ -44,7 +46,7 @@ export default function AppRoutes() {
           <Route
             path="/audit-logs"
             element={
-              <RoleGuard allowedRoles={['ADMIN']}>
+              <RoleGuard allowedRoles={['ADMIN', 'ATTORNEY']}>
                 <AuditLogs />
               </RoleGuard>
             }
