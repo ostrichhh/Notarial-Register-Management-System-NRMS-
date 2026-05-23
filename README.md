@@ -38,10 +38,10 @@ The Notarial Register Management System (NRMS) is a web-based system for Ocasion
 
 ## Technologies Used
 - Backend: Django REST Framework  
-- Frontend: React / Next.js  
+- Frontend: React.js  
 - Database: SQLite  
-- API: RESTful  
-
+- API: REST-style JSON API
+  
 ## System Workflow
 1. Secretary registers client  
 2. Draft entry is prepared  
